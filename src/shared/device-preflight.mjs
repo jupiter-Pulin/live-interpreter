@@ -3,6 +3,16 @@
 
 const ROLES = ['capture', 'monitor', 'mic', 'virtualMic']
 
+// 各角色期望的端点类型。真机上 deviceId 不是全局唯一的（同一块 BlackHole 的
+// 进出两条条目可能共用一个 deviceId，Chrome 的 'default' 伪条目在输入/输出两侧
+// 也都叫 'default'），因此覆盖值必须按「kind + deviceId」解析，不能只按 deviceId。
+const ROLE_KINDS = {
+  capture: 'audioinput',
+  monitor: 'audiooutput',
+  mic: 'audioinput',
+  virtualMic: 'audiooutput',
+}
+
 function isBlackHole(entry) {
   return typeof entry.label === 'string' && entry.label.includes('BlackHole')
 }
@@ -26,11 +36,20 @@ export function preflight(devices, overrides = {}) {
     return fail('permission_denied', '设备列表不可用（列表为空或设备名全为空），请先授予浏览器麦克风权限后重试。')
   }
 
+  // 覆盖值解析：优先取「期望 kind + 该 deviceId」的条目；没有该 kind 的条目时，
+  // 回退到同 deviceId 的任意条目并标记 kindMatched 为 false，交给调用方报 kind 不符。
+  // id 在列表中完全不存在时返回 null。
+  function resolveOverride(id, wantKind) {
+    const exact = devices.find((d) => d.deviceId === id && d.kind === wantKind)
+    if (exact) return { entry: exact, kindMatched: true }
+    const anyKind = devices.find((d) => d.deviceId === id)
+    return anyKind ? { entry: anyKind, kindMatched: false } : null
+  }
+
   // 规则 0'：覆盖值必须真实存在
-  const byId = new Map(devices.map((d) => [d.deviceId, d]))
   for (const role of ROLES) {
     const id = overrides[role]
-    if (id !== undefined && !byId.has(id)) {
+    if (id !== undefined && resolveOverride(id, ROLE_KINDS[role]) === null) {
       return fail('device_missing', `角色 ${role} 选择的设备已失效（在当前设备列表中不存在），请重新选择。`)
     }
   }
@@ -76,10 +95,11 @@ export function preflight(devices, overrides = {}) {
   // 规则 4/5：capture 取第一块的 audioinput，virtualMic 取第二块的 audiooutput
   let captureEntry
   if (overrides.capture !== undefined) {
-    captureEntry = byId.get(overrides.capture)
-    if (captureEntry.kind !== 'audioinput') {
+    const resolved = resolveOverride(overrides.capture, 'audioinput')
+    if (!resolved.kindMatched) {
       return fail('device_missing', '角色 capture 必须选择一个输入端点（audioinput），当前选择不是输入设备。')
     }
+    captureEntry = resolved.entry
   } else {
     captureEntry = pickFromBlock(sortedBlocks[0], 'audioinput')
     if (!captureEntry) {
@@ -89,10 +109,11 @@ export function preflight(devices, overrides = {}) {
 
   let virtualMicEntry
   if (overrides.virtualMic !== undefined) {
-    virtualMicEntry = byId.get(overrides.virtualMic)
-    if (virtualMicEntry.kind !== 'audiooutput') {
+    const resolved = resolveOverride(overrides.virtualMic, 'audiooutput')
+    if (!resolved.kindMatched) {
       return fail('device_missing', '角色 virtualMic 必须选择一个输出端点（audiooutput），当前选择不是输出设备。')
     }
+    virtualMicEntry = resolved.entry
   } else {
     virtualMicEntry = pickFromBlock(sortedBlocks[1], 'audiooutput')
     if (!virtualMicEntry) {
@@ -109,12 +130,12 @@ export function preflight(devices, overrides = {}) {
   function pickNonBlackHole(kind, roleLabel, emptyMessage) {
     const overrideId = overrides[roleLabel]
     if (overrideId !== undefined) {
-      const entry = byId.get(overrideId)
+      const { entry, kindMatched } = resolveOverride(overrideId, kind)
       // 规则 8：自听回环防线
       if (isBlackHole(entry)) {
         return fail('device_missing', `角色 ${roleLabel} 不能使用 BlackHole 设备：这会造成自听回环，请选择真实的耳机或麦克风。`)
       }
-      if (entry.kind !== kind) {
+      if (!kindMatched) {
         return fail('device_missing', `角色 ${roleLabel} 选择的设备类型不符（需要 ${kind}），请重新选择。`)
       }
       return entry

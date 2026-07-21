@@ -26,6 +26,20 @@ const ONE_BLOCK = [
   { deviceId: 'mic-a', kind: 'audioinput', label: 'USB Microphone', groupId: 'g-usb' },
 ]
 
+// 真机形态（Chrome / macOS）：deviceId 在整个列表中并不唯一。
+// 同一块 BlackHole 的 audioinput 与 audiooutput 条目共用一个 deviceId，
+// Chrome 的 default 伪设备也在输入侧与输出侧各有一条、都叫 'default'。
+const SHARED_IDS = [
+  { deviceId: 'default', kind: 'audiooutput', label: '默认 - External Headphones', groupId: 'g-hp' },
+  { deviceId: 'default', kind: 'audioinput', label: '默认 - MacBook Pro Microphone', groupId: 'g-mic' },
+  { deviceId: 'bh2', kind: 'audioinput', label: 'BlackHole 2ch', groupId: 'g-bh2' },
+  { deviceId: 'bh2', kind: 'audiooutput', label: 'BlackHole 2ch', groupId: 'g-bh2' },
+  { deviceId: 'bh16', kind: 'audiooutput', label: 'BlackHole 16ch', groupId: 'g-bh16' },
+  { deviceId: 'bh16', kind: 'audioinput', label: 'BlackHole 16ch', groupId: 'g-bh16' },
+  { deviceId: 'hp-1', kind: 'audiooutput', label: 'External Headphones', groupId: 'g-hp' },
+  { deviceId: 'mic-1', kind: 'audioinput', label: 'MacBook Pro Microphone', groupId: 'g-mic' },
+]
+
 test('AC-003 默认分配：通道数升序、kind 正确、与列表顺序无关', () => {
   const r = preflight(TWO_BLOCKS, {})
   assert.equal(r.category, 'ok')
@@ -80,6 +94,67 @@ test('AC-007 覆盖不能绕过物理设备互斥', () => {
   assert.equal(b.category, 'device_missing')
   const c = preflight(TWO_BLOCKS, { capture: 'not-in-list' })
   assert.equal(c.category, 'device_missing')
+})
+
+test('deviceId 非全局唯一时，合法的四角色覆盖不被误拒', () => {
+  const base = preflight(SHARED_IDS, {})
+  assert.equal(base.category, 'ok')
+
+  // 同一块 BlackHole 的进出两条共用 deviceId：按角色期望的 kind 解析，两个方向都要成立
+  const capture = preflight(SHARED_IDS, { capture: 'bh2' })
+  assert.equal(capture.category, 'ok', capture.message)
+  assert.equal(capture.roles.capture, 'bh2')
+  const virtualMic = preflight(SHARED_IDS, { virtualMic: 'bh16' })
+  assert.equal(virtualMic.category, 'ok', virtualMic.message)
+  assert.equal(virtualMic.roles.virtualMic, 'bh16')
+
+  // 'default' 伪条目在输入/输出两侧同名：monitor 取输出侧、mic 取输入侧
+  const monitor = preflight(SHARED_IDS, { monitor: 'default' })
+  assert.equal(monitor.category, 'ok', monitor.message)
+  assert.equal(monitor.roles.monitor, 'default')
+  assert.equal(monitor.labels.monitor, '默认 - External Headphones')
+  const mic = preflight(SHARED_IDS, { mic: 'default' })
+  assert.equal(mic.category, 'ok', mic.message)
+  assert.equal(mic.roles.mic, 'default')
+  assert.equal(mic.labels.mic, '默认 - MacBook Pro Microphone')
+
+  const all = preflight(SHARED_IDS, { capture: 'bh2', virtualMic: 'bh16', monitor: 'hp-1', mic: 'mic-1' })
+  assert.equal(all.category, 'ok', all.message)
+  assert.deepEqual(all.roles, { capture: 'bh2', virtualMic: 'bh16', monitor: 'hp-1', mic: 'mic-1' })
+})
+
+test('deviceId 非全局唯一时，既有防线仍然成立', () => {
+  // 规则 0'：id 完全不存在
+  const missing = preflight(SHARED_IDS, { capture: 'not-in-list' })
+  assert.equal(missing.category, 'device_missing')
+  assert.ok(missing.message.includes('已失效'))
+
+  // 规则 4：capture 与 virtualMic 落在同一块物理设备（此处连 deviceId 都相同）
+  const sameBlock = preflight(SHARED_IDS, { capture: 'bh2', virtualMic: 'bh2' })
+  assert.equal(sameBlock.category, 'device_missing')
+  assert.ok(sameBlock.message.includes('两块不同'))
+
+  // 规则 8：monitor / mic 落在 BlackHole 上
+  const monitorLoop = preflight(SHARED_IDS, { monitor: 'bh16' })
+  assert.equal(monitorLoop.category, 'device_missing')
+  assert.ok(monitorLoop.message.includes('回环'))
+  const micLoop = preflight(SHARED_IDS, { mic: 'bh2' })
+  assert.equal(micLoop.category, 'device_missing')
+  assert.ok(micLoop.message.includes('回环'))
+
+  // kind 不符：该 id 只存在于另一侧（hp-1 无输入条目、mic-1 无输出条目）
+  const captureIsOutput = preflight(SHARED_IDS, { capture: 'hp-1' })
+  assert.equal(captureIsOutput.category, 'device_missing')
+  assert.ok(captureIsOutput.message.includes('输入端点'))
+  const virtualMicIsInput = preflight(SHARED_IDS, { virtualMic: 'mic-1' })
+  assert.equal(virtualMicIsInput.category, 'device_missing')
+  assert.ok(virtualMicIsInput.message.includes('输出端点'))
+  const monitorIsInput = preflight(SHARED_IDS, { monitor: 'mic-1' })
+  assert.equal(monitorIsInput.category, 'device_missing')
+  assert.ok(monitorIsInput.message.includes('类型不符'))
+  const micIsOutput = preflight(SHARED_IDS, { mic: 'hp-1' })
+  assert.equal(micIsOutput.category, 'device_missing')
+  assert.ok(micIsOutput.message.includes('类型不符'))
 })
 
 test('AC-028 自听回环防线与无可用非 BlackHole 设备', () => {

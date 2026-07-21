@@ -76,6 +76,45 @@ test('AC-009 mock 全链路：字幕 + 音频帧 + 无外呼 + config 衔接守�
   await mock.stop()
 })
 
+test('AC-001 audioSink 抛出异常不中断消息处理', async () => {
+  const mock = await startMockRealtime({ port: 0 })
+  let errorCount = 0
+  let lastError = null
+  const session = createSession({
+    WebSocketCtor: WebSocket,
+    url: mock.url,
+    audioSink: () => {
+      throw new Error('播放失败（注入故障）')
+    },
+    directionId: 'downlink',
+  })
+  session.on('error', (payload) => {
+    errorCount++
+    lastError = payload
+  })
+  await once(session, 'open')
+  session.sendAudio(new Uint8Array(4800))
+  const sub1 = await once(session, 'subtitle-delta')
+  assert.ok(sub1.text.length > 0)
+  // 给协议层足够时间处理该句剩余消息（audio delta + done）
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  assert.equal(errorCount, 1, 'audioSink 抛出应恰好触发一次 error 事件')
+  assert.equal(lastError.category, 'api_error')
+  assert.ok(typeof lastError.message === 'string' && lastError.message.length > 0)
+  assert.equal(session.getState(), 'running', '回调异常不应导致会话掉线')
+
+  // 等下一句节流窗口过去，确认后续 subtitle-delta 仍可达
+  await new Promise((resolve) => setTimeout(resolve, 2100))
+  const sub2 = once(session, 'subtitle-delta')
+  session.sendAudio(new Uint8Array(4800))
+  const payload2 = await sub2
+  assert.ok(payload2.text.length > 0)
+  assert.equal(session.getState(), 'running')
+
+  session.close()
+  await mock.stop()
+})
+
 test('AC-020(a) 对端断开：closed 事件 + network_unavailable + disconnected', async () => {
   const mock = await startMockRealtime({ port: 0 })
   const session = createSession({

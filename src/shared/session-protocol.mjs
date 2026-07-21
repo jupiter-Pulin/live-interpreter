@@ -60,7 +60,14 @@ export function createSession({ WebSocketCtor, url, protocols, audioSink, direct
         break
       case 'session.output_audio.delta': {
         const bytes = base64ToBytes(msg.delta ?? '')
-        if (audioSink) audioSink(bytes)
+        if (audioSink) {
+          try {
+            audioSink(bytes)
+          } catch {
+            // 播放侧异常不得中断协议层消息处理，归类上报后继续
+            emit('error', { category: 'api_error', message: messageFor('api_error') })
+          }
+        }
         emit('audio-frame', { bytes })
         break
       }

@@ -78,7 +78,9 @@ async function startDirection(directionId) {
   try {
     const endpoint = selectSessionEndpoint(config)
     const sinkId = resolveSinkId(directionId, result.roles)
-    const player = await createPlayer(sinkId)
+    const player = await createPlayer(sinkId, {
+      onPlaybackError: () => showError('播放音频失败，请检查所选耳机/扬声器设备设置。'),
+    })
     const session = await openTranslationSession({
       endpoint,
       directionId,

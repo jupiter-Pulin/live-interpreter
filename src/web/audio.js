@@ -1,4 +1,5 @@
 import { buildCaptureConstraints } from '/shared/audio-routing.mjs'
+import { needsPermissionProbe } from '/shared/permission-probe.mjs'
 
 // 浏览器音频接线：采集为 24kHz PCM16 块；播放端按 sinkId 定向输出。
 // 判定逻辑一律在 src/shared/，此处只碰真实浏览器 API。
@@ -36,25 +37,34 @@ export async function startCapture(deviceId, onChunk) {
   }
 }
 
-export async function createPlayer(sinkId) {
-  const ctx = new AudioContext({ sampleRate: SAMPLE_RATE })
+export async function createPlayer(sinkId, { onPlaybackError } = {}) {
+  // 不强制构造采样率：交由浏览器按设备实际输出率重采样，避免部分蓝牙耳机在非常规采样率下无声
+  const ctx = new AudioContext()
   if (typeof ctx.setSinkId === 'function' && sinkId) {
     await ctx.setSinkId(sinkId)
   }
+  if (ctx.state !== 'running') {
+    await ctx.resume()
+  }
+  console.log(`[player] sink=${sinkId ?? '(default)'} state=${ctx.state} sampleRate=${ctx.sampleRate}`)
   let playhead = 0
   return {
     enqueue(bytes) {
-      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-      const frames = bytes.byteLength / 2
-      const buffer = ctx.createBuffer(1, frames, SAMPLE_RATE)
-      const ch = buffer.getChannelData(0)
-      for (let i = 0; i < frames; i++) ch[i] = view.getInt16(i * 2, true) / 0x8000
-      const src = ctx.createBufferSource()
-      src.buffer = buffer
-      src.connect(ctx.destination)
-      const startAt = Math.max(ctx.currentTime, playhead)
-      src.start(startAt)
-      playhead = startAt + buffer.duration
+      try {
+        const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+        const frames = bytes.byteLength / 2
+        const buffer = ctx.createBuffer(1, frames, SAMPLE_RATE)
+        const ch = buffer.getChannelData(0)
+        for (let i = 0; i < frames; i++) ch[i] = view.getInt16(i * 2, true) / 0x8000
+        const src = ctx.createBufferSource()
+        src.buffer = buffer
+        src.connect(ctx.destination)
+        const startAt = Math.max(ctx.currentTime, playhead)
+        src.start(startAt)
+        playhead = startAt + buffer.duration
+      } catch (err) {
+        onPlaybackError?.(err)
+      }
     },
     stop() {
       ctx.close()
@@ -62,16 +72,23 @@ export async function createPlayer(sinkId) {
   }
 }
 
-export async function enumerateAudioDevices() {
-  // 先取一次权限，否则 enumerateDevices 的 label 为空
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    for (const track of stream.getTracks()) track.stop()
-  } catch {
-    // 权限被拒时仍返回列表，由 preflight 判为 permission_denied
-  }
+async function listAudioDevices() {
   const devices = await navigator.mediaDevices.enumerateDevices()
   return devices
     .filter((d) => d.kind === 'audioinput' || d.kind === 'audiooutput')
     .map((d) => ({ deviceId: d.deviceId, kind: d.kind, label: d.label, groupId: d.groupId }))
+}
+
+export async function enumerateAudioDevices() {
+  let devices = await listAudioDevices()
+  if (needsPermissionProbe(devices)) {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      for (const track of stream.getTracks()) track.stop()
+    } catch {
+      // 权限被拒时仍返回列表，由 preflight 判为 permission_denied
+    }
+    devices = await listAudioDevices()
+  }
+  return devices
 }

@@ -17,8 +17,9 @@
   button.stop { background: #7a3030; }
   button.muted { background: #555c66; }
   .status { font-size: 12px; color: #8fa; }
-  #subtitle-current { font-size: 22px; line-height: 1.5; min-height: 2em; }
-  #subtitle-history { font-size: 14px; color: #99a; max-height: 10em; overflow-y: auto; white-space: pre-line; }
+  .subtitle-current { font-size: 22px; line-height: 1.5; min-height: 2em; }
+  .subtitle-history { font-size: 14px; color: #99a; max-height: 10em; overflow-y: auto; white-space: pre-line; }
+  .subtitle-label { font-size: 12px; color: #7d8895; margin-bottom: 4px; }
   #latency { font-variant-numeric: tabular-nums; }
   #error-area { color: #ff8a80; font-size: 14px; min-height: 1.5em; }
 </style>
@@ -41,8 +42,8 @@
     <span class="status" id="status-downlink">已停止</span>
     <span>延迟 <span id="latency">—</span></span>
   </div>
-  <div id="subtitle-current"></div>
-  <div id="subtitle-history"></div>
+  <div class="subtitle-current" id="subtitle-current-downlink"></div>
+  <div class="subtitle-history" id="subtitle-history-downlink"></div>
 </div>
 
 <div class="panel">
@@ -52,6 +53,9 @@
     <button id="btn-mute" class="muted">已静音（点击开始翻译）</button>
     <span class="status" id="status-uplink">已停止</span>
   </div>
+  <div class="subtitle-label">上行字幕 · 你的中文译成的英语</div>
+  <div class="subtitle-current" id="subtitle-current-uplink"></div>
+  <div class="subtitle-history" id="subtitle-history-uplink"></div>
 </div>
 
 <div class="panel">

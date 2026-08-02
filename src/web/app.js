@@ -2,7 +2,7 @@ import { selectSessionEndpoint } from '/shared/session-endpoint.mjs'
 import { preflight } from '/shared/device-preflight.mjs'
 import { createInitialState, start, stop, toggleMute } from '/shared/session-state.mjs'
 import { forwardMicAudio, resolveSinkId } from '/shared/audio-routing.mjs'
-import { createSubtitles } from '/shared/subtitles.mjs'
+import { createDirectionSubtitles } from '/shared/direction-subtitles.mjs'
 import { createLatencyTracker } from '/shared/latency.mjs'
 import { enumerateAudioDevices, startCapture, createPlayer } from '/audio.js'
 import { openTranslationSession } from '/session.js'
@@ -11,7 +11,7 @@ import { openTranslationSession } from '/session.js'
 
 let state = createInitialState()
 let config = null
-const subtitles = createSubtitles()
+const subtitles = createDirectionSubtitles()
 const latency = createLatencyTracker()
 const live = { downlink: null, uplink: null } // { session, capture, player }
 
@@ -31,8 +31,10 @@ function render() {
   $('btn-uplink').classList.toggle('stop', state.uplink.status === 'running')
   $('btn-mute').textContent = state.uplink.muted ? '已静音（点击开始翻译）' : '翻译中（点击静音）'
   $('btn-mute').classList.toggle('muted', state.uplink.muted)
-  $('subtitle-current').textContent = subtitles.getCurrentLine()
-  $('subtitle-history').textContent = subtitles.getHistory().slice(-8).join('\n')
+  for (const directionId of subtitles.directionIds) {
+    $(`subtitle-current-${directionId}`).textContent = subtitles.getCurrentLine(directionId)
+    $(`subtitle-history-${directionId}`).textContent = subtitles.getRecentHistory(directionId).join('\n')
+  }
   const ms = latency.getCurrentLatencyMs('downlink')
   $('latency').textContent = ms === null ? '—' : `${Math.round(ms)} ms`
 }
@@ -85,7 +87,7 @@ async function startDirection(directionId) {
       endpoint,
       directionId,
       audioSink: (bytes) => player.enqueue(bytes),
-      subtitles,
+      subtitles: subtitles.for(directionId),
       latency,
       onEvent: onSessionEvent,
     })

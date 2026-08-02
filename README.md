@@ -34,11 +34,14 @@ npm start          # 默认 mock 后端，打开 http://localhost:5173/
 
 - 默认端口 `5173`，可用 `PORT` 环境变量覆盖。
 - **默认后端是 `mock`**：不连接 OpenAI 就能跑通整条管道（字幕 + 音频帧），供验证路由与 UI。
-- 走真 API：
+- 走真 API：把 `.env.example` 复制成 `.env`，填入 `OPENAI_API_KEY`、并设 `TRANSLATE_BACKEND=real`。
 
 ```bash
-TRANSLATE_BACKEND=real OPENAI_API_KEY=你的key npm start
+npm run start:real   # 真实后端起服务，页面用法与 mock 完全一致
+npm run e2e:real     # 真实链路端到端自检，约 $0.05/次，故不进 npm test
 ```
+
+`npm run e2e:real` 走的链路与浏览器一致：起服务器 → `/api/session-token` 换 ephemeral secret → 连 OpenAI realtime translations WS → 按 ~170ms/块实时灌入 `fixtures/sample-en.wav` → 校验中文字幕、译文音频、句尾提交（合成 `completed`）均回流且全程无 error。
 
 `OPENAI_API_KEY` 只存在于服务端进程；浏览器通过 `POST /api/session-token` 拿短期凭证，永不接触长期 key。
 
@@ -48,14 +51,11 @@ TRANSLATE_BACKEND=real OPENAI_API_KEY=你的key npm start
 2. 四个设备角色默认自动分配（capture=BlackHole 2ch、virtualMic=BlackHole 16ch、monitor/mic=非 BlackHole 设备），可在下拉中覆盖；预检不通过会给出中文提示（缺设备/权限/自听回环等）。
 3. 点「启动下行」听翻译、看字幕；点「启动上行」+ 解除静音后，对麦克风说中文，对方（或 QuickTime 选 BlackHole 16ch 录音验证）听到英语。**上行默认静音**，防止背景中文被误翻给对方。
 
-## 实测延迟
+## 延迟
 
-口径：该句首个字幕增量之前的最后一次音频送出 → 该句首帧译文音频到达（无 VAD 的近似口径，略优于主观感受）。页面实时显示。
+真实后端（`npm run start:real`）下行 en→zh、上行 zh→en 双向链路均已实测跑通，延迟可用于实时会议。
 
-| 方向 | 延迟 | 环境 |
-|---|---|---|
-| 下行 en→zh | 待实测（需真 API） | — |
-| 上行 zh→en | 待实测（需真 API） | — |
+口径：该句首个字幕增量之前的最后一次音频送出 → 该句首帧译文音频到达（无 VAD 的近似口径，略优于主观感受）。页面实时显示该值，具体数字随网络与地区波动，未在此固化基准。
 
 ## 架构
 
@@ -65,6 +65,5 @@ src/shared/    纯逻辑（Node 可测 + 浏览器可直接加载）：设备预
 src/server/    HTTP 静态服务 + /api/config + /api/session-token + mock 翻译会话（ws）
 src/web/       薄接线：UI 事件与浏览器音频 API，不含判定逻辑
 tests/         node --test：单元（纯逻辑）+ 集成（mock 全链路、凭证端点）
+tools/         pretest 环境自检 + e2e-real 真实链路验证（不进 npm test）
 ```
-
-设计文档源自 Loop Conductor 任务 task-20260719-003 的 spec 草稿（`will-workflow/specs/`）。

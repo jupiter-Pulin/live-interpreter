@@ -20,7 +20,7 @@ function base64ToBytes(b64) {
   return bytes
 }
 
-export function createSession({ WebSocketCtor, url, protocols, audioSink, directionId }) {
+export function createSession({ WebSocketCtor, url, protocols, audioSink, directionId, idleCommitMs = 1200 }) {
   const handlers = new Map()
   let state = 'idle'
   let closedByClient = false
@@ -28,6 +28,31 @@ export function createSession({ WebSocketCtor, url, protocols, audioSink, direct
 
   function emit(eventName, payload) {
     for (const h of handlers.get(eventName) ?? []) h(payload)
+  }
+
+  // 真实后端（gpt-realtime-translate）持续流式输出、从不发送
+  // session.output_transcript.done；mock 后端每句都发。为使两种后端对上层
+  // 表现一致，输出流停顿 idleCommitMs 后合成一次 completed；显式 done 到达
+  // 时取消合成，绝不重复提交。
+  let idleTimer = null
+  let sentenceOpen = false
+
+  function cancelIdleCommit() {
+    if (idleTimer !== null) {
+      clearTimeout(idleTimer)
+      idleTimer = null
+    }
+  }
+
+  function scheduleIdleCommit() {
+    cancelIdleCommit()
+    idleTimer = setTimeout(() => {
+      idleTimer = null
+      if (sentenceOpen) {
+        sentenceOpen = false
+        emit('completed')
+      }
+    }, idleCommitMs)
   }
 
   const ws = protocols ? new WebSocketCtor(url, protocols) : new WebSocketCtor(url)
@@ -56,9 +81,12 @@ export function createSession({ WebSocketCtor, url, protocols, audioSink, direct
     }
     switch (msg.type) {
       case 'session.output_transcript.delta':
+        sentenceOpen = true
+        scheduleIdleCommit()
         emit('subtitle-delta', { text: msg.delta ?? '' })
         break
       case 'session.output_audio.delta': {
+        if (sentenceOpen) scheduleIdleCommit()
         const bytes = base64ToBytes(msg.delta ?? '')
         if (audioSink) {
           try {
@@ -72,6 +100,8 @@ export function createSession({ WebSocketCtor, url, protocols, audioSink, direct
         break
       }
       case 'session.output_transcript.done':
+        cancelIdleCommit()
+        sentenceOpen = false
         emit('completed')
         break
       case 'session.input_transcript.delta':
@@ -87,6 +117,7 @@ export function createSession({ WebSocketCtor, url, protocols, audioSink, direct
   })
 
   ws.addEventListener('close', () => {
+    cancelIdleCommit()
     state = 'disconnected'
     // 客户端主动 close() 是正常操作，不派发 closed 事件
     if (!closedByClient) {
@@ -119,6 +150,7 @@ export function createSession({ WebSocketCtor, url, protocols, audioSink, direct
     },
     close() {
       closedByClient = true
+      cancelIdleCommit()
       state = 'disconnected'
       try {
         ws.close()

@@ -35,3 +35,19 @@ test('AC-005 player AudioContext 不再强制 sampleRate:24000，createBuffer �
   assert.ok(!/new AudioContext\(\s*\{\s*sampleRate/.test(fn), 'player 的 AudioContext 不得强制构造 sampleRate')
   assert.ok(/createBuffer\(1,\s*frames,\s*(SAMPLE_RATE|24000)\)/.test(fn), 'createBuffer 仍需以 24000 声明帧数据采样率')
 })
+
+test('AC-031 createPlayer 挂起看门狗：statechange 时自动 resume，stop 后不再抢救', async () => {
+  // 实机踩坑：Chrome 将后台标签页中输出到虚拟声卡的上下文判为不可闻而挂起，
+  // 字幕正常滚动但译文音频进不了 BlackHole（录音中段大段无声）。
+  const fn = await readPlayerSource()
+  assert.ok(/addEventListener\(\s*['"]statechange['"]/.test(fn), '必须监听 AudioContext statechange')
+  const compact = fn.replace(/\s+/g, ' ')
+  assert.ok(
+    /statechange[\s\S]*state === 'suspended'[\s\S]*ctx\.resume\(\)/.test(fn),
+    '挂起时必须自动 resume'
+  )
+  assert.ok(/closedByUs/.test(fn) && /stop\(\) \{ closedByUs = true/.test(compact), '主动 stop 后看门狗必须失效，不得复活已关闭的上下文')
+  const enqueueStart = fn.indexOf('enqueue(bytes)')
+  const enqueueBody = fn.slice(enqueueStart, fn.indexOf('stop()', enqueueStart))
+  assert.ok(/suspended/.test(enqueueBody) && /resume/.test(enqueueBody), 'enqueue 遇挂起状态也要触发 resume 兜底')
+})

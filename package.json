@@ -10,7 +10,9 @@
   "scripts": {
     "pretest": "node tools/pretest.mjs",
     "test": "node --test \"tests/**/*.test.mjs\"",
-    "start": "node src/server/index.mjs"
+    "start": "node src/server/index.mjs",
+    "start:real": "node --env-file=.env src/server/index.mjs",
+    "e2e:real": "node --env-file=.env tools/e2e-real.mjs"
   },
   "dependencies": {
     "ws": "^8.18.0"

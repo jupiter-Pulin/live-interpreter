@@ -97,3 +97,60 @@ test('AC-028 自听回环防线与无可用非 BlackHole 设备', () => {
   assert.notEqual(a.message, c.message)
   assert.notEqual(b.message, c.message)
 })
+
+test('AC-029 同一 deviceId 兼作 input/output（Chrome 实机形态）：覆盖按角色 kind 取端点', () => {
+  // 实机踩坑：同一块声卡的 input/output 两条记录共用同一个 deviceId，
+  // 按 id 建平面索引会让后枚举的条目覆盖前者，导致 capture 覆盖被误判为输出设备。
+  const SHARED_ID = [
+    { deviceId: 'bh2', kind: 'audioinput', label: 'BlackHole 2ch (Virtual)', groupId: 'g-bh2' },
+    { deviceId: 'bh2', kind: 'audiooutput', label: 'BlackHole 2ch (Virtual)', groupId: 'g-bh2' },
+    { deviceId: 'bh16', kind: 'audioinput', label: 'BlackHole 16ch (Virtual)', groupId: 'g-bh16' },
+    { deviceId: 'bh16', kind: 'audiooutput', label: 'BlackHole 16ch (Virtual)', groupId: 'g-bh16' },
+    { deviceId: 'hp', kind: 'audiooutput', label: 'EDIFIER Fit900NB', groupId: 'g-hp' },
+    { deviceId: 'mic', kind: 'audioinput', label: 'EDIFIER Fit900NB', groupId: 'g-mic' },
+  ]
+  const a = preflight(SHARED_ID, { capture: 'bh2' })
+  assert.equal(a.category, 'ok', `capture 覆盖应取 audioinput 端点：${a.message ?? ''}`)
+  assert.equal(a.roles.capture, 'bh2')
+  assert.equal(a.roles.virtualMic, 'bh16')
+
+  const b = preflight(SHARED_ID, { virtualMic: 'bh16' })
+  assert.equal(b.category, 'ok', `virtualMic 覆盖应取 audiooutput 端点：${b.message ?? ''}`)
+
+  // 覆盖指向的 id 只有错误方向的端点时，仍应报方向错误
+  const onlyOut = SHARED_ID.filter((d) => !(d.deviceId === 'bh16' && d.kind === 'audiooutput'))
+  const c = preflight(onlyOut, { virtualMic: 'bh16' })
+  assert.equal(c.category, 'device_missing')
+  assert.ok(c.message.includes('输出端点'))
+})
+
+test('AC-030 聚合设备回环防线：多输出设备不得用作 monitor/mic，默认分配自动跳过', () => {
+  // 实机踩坑：monitor 被默认分配到「多输出设备」（内含 BlackHole 2ch），
+  // 译文灌回 capture 形成自听回环，模型无限重复同一句译文。
+  const WITH_AGGREGATE = [
+    { deviceId: 'agg', kind: 'audiooutput', label: '多输出设备', groupId: 'g-agg' },
+    { deviceId: 'bh2-in', kind: 'audioinput', label: 'BlackHole 2ch', groupId: 'g-bh2' },
+    { deviceId: 'bh2-out', kind: 'audiooutput', label: 'BlackHole 2ch', groupId: 'g-bh2' },
+    { deviceId: 'bh16-in', kind: 'audioinput', label: 'BlackHole 16ch', groupId: 'g-bh16' },
+    { deviceId: 'bh16-out', kind: 'audiooutput', label: 'BlackHole 16ch', groupId: 'g-bh16' },
+    { deviceId: 'zz-hp', kind: 'audiooutput', label: 'EDIFIER Fit900NB', groupId: 'g-hp' },
+    { deviceId: 'zz-mic', kind: 'audioinput', label: 'EDIFIER Fit900NB', groupId: 'g-mic' },
+  ]
+  // 默认分配：'agg' 字典序在 'zz-hp' 之前，但必须被跳过
+  const a = preflight(WITH_AGGREGATE, {})
+  assert.equal(a.category, 'ok', a.message ?? '')
+  assert.equal(a.roles.monitor, 'zz-hp', '默认分配必须跳过聚合设备')
+
+  // 显式覆盖为聚合设备也要拒绝，且文案与 BlackHole 回环不同
+  const b = preflight(WITH_AGGREGATE, { monitor: 'agg' })
+  assert.equal(b.category, 'device_missing')
+  assert.ok(b.message.includes('聚合'))
+  const c = preflight(WITH_AGGREGATE, { monitor: 'bh16-out' })
+  assert.ok(c.message.includes('回环'))
+  assert.notEqual(b.message, c.message)
+
+  // 英文命名的聚合设备同样命中
+  const en = WITH_AGGREGATE.map((d) => (d.deviceId === 'agg' ? { ...d, label: 'Multi-Output Device' } : d))
+  const e = preflight(en, {})
+  assert.equal(e.roles.monitor, 'zz-hp')
+})

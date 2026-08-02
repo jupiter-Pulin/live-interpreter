@@ -7,6 +7,12 @@ function isBlackHole(entry) {
   return typeof entry.label === 'string' && entry.label.includes('BlackHole')
 }
 
+// 聚合类设备（多输出/聚合）可能把 BlackHole 包在内部而无法从浏览器侧识别，
+// 用作 monitor 会把译文灌回 capture 形成自听回环（实机踩过：译文无限重复）。
+function isAggregate(entry) {
+  return typeof entry?.label === 'string' && /多输出|聚合|multi-?output|aggregate/i.test(entry.label)
+}
+
 function physKey(entry) {
   return entry.groupId && entry.groupId !== '' ? `g:${entry.groupId}` : `l:${entry.label}`
 }
@@ -26,11 +32,14 @@ export function preflight(devices, overrides = {}) {
     return fail('permission_denied', '设备列表不可用（列表为空或设备名全为空），请先授予浏览器麦克风权限后重试。')
   }
 
-  // 规则 0'：覆盖值必须真实存在
-  const byId = new Map(devices.map((d) => [d.deviceId, d]))
+  // 规则 0'：覆盖值必须真实存在。
+  // 注意：同一物理设备的 input/output 两条记录在 Chrome 中可能共用同一个
+  // deviceId，因此查表必须带 kind，否则会取错端点方向（实机踩过）。
+  const byKindId = new Map(devices.map((d) => [`${d.kind}:${d.deviceId}`, d]))
+  const anyById = (id) => devices.find((d) => d.deviceId === id)
   for (const role of ROLES) {
     const id = overrides[role]
-    if (id !== undefined && !byId.has(id)) {
+    if (id !== undefined && !anyById(id)) {
       return fail('device_missing', `角色 ${role} 选择的设备已失效（在当前设备列表中不存在），请重新选择。`)
     }
   }
@@ -76,8 +85,8 @@ export function preflight(devices, overrides = {}) {
   // 规则 4/5：capture 取第一块的 audioinput，virtualMic 取第二块的 audiooutput
   let captureEntry
   if (overrides.capture !== undefined) {
-    captureEntry = byId.get(overrides.capture)
-    if (captureEntry.kind !== 'audioinput') {
+    captureEntry = byKindId.get(`audioinput:${overrides.capture}`)
+    if (!captureEntry) {
       return fail('device_missing', '角色 capture 必须选择一个输入端点（audioinput），当前选择不是输入设备。')
     }
   } else {
@@ -89,8 +98,8 @@ export function preflight(devices, overrides = {}) {
 
   let virtualMicEntry
   if (overrides.virtualMic !== undefined) {
-    virtualMicEntry = byId.get(overrides.virtualMic)
-    if (virtualMicEntry.kind !== 'audiooutput') {
+    virtualMicEntry = byKindId.get(`audiooutput:${overrides.virtualMic}`)
+    if (!virtualMicEntry) {
       return fail('device_missing', '角色 virtualMic 必须选择一个输出端点（audiooutput），当前选择不是输出设备。')
     }
   } else {
@@ -109,18 +118,24 @@ export function preflight(devices, overrides = {}) {
   function pickNonBlackHole(kind, roleLabel, emptyMessage) {
     const overrideId = overrides[roleLabel]
     if (overrideId !== undefined) {
-      const entry = byId.get(overrideId)
-      // 规则 8：自听回环防线
-      if (isBlackHole(entry)) {
+      // 规则 8：自听回环防线（按 id 判定，任一方向命中 BlackHole 都拒绝）
+      if (isBlackHole(anyById(overrideId))) {
         return fail('device_missing', `角色 ${roleLabel} 不能使用 BlackHole 设备：这会造成自听回环，请选择真实的耳机或麦克风。`)
       }
-      if (entry.kind !== kind) {
+      if (isAggregate(anyById(overrideId))) {
+        return fail(
+          'device_missing',
+          `角色 ${roleLabel} 不能使用多输出/聚合设备：它可能包含 BlackHole 并把译文灌回采集端造成回环，请直接选择真实的耳机或麦克风。`
+        )
+      }
+      const entry = byKindId.get(`${kind}:${overrideId}`)
+      if (!entry) {
         return fail('device_missing', `角色 ${roleLabel} 选择的设备类型不符（需要 ${kind}），请重新选择。`)
       }
       return entry
     }
     const candidates = devices
-      .filter((d) => d.kind === kind && !isBlackHole(d))
+      .filter((d) => d.kind === kind && !isBlackHole(d) && !isAggregate(d))
       .sort((a, b) => (a.deviceId < b.deviceId ? -1 : 1))
     if (candidates.length === 0) return fail('device_missing', emptyMessage)
     return candidates[0]

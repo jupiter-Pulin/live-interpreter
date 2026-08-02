@@ -47,10 +47,23 @@ export async function createPlayer(sinkId, { onPlaybackError } = {}) {
     await ctx.resume()
   }
   console.log(`[player] sink=${sinkId ?? '(default)'} state=${ctx.state} sampleRate=${ctx.sampleRate}`)
+  // 挂起看门狗：Chrome 可能把后台标签页中输出到虚拟声卡（BlackHole）的上下文
+  // 判为“不可闻”而挂起——字幕照常滚动但音频进不了虚拟麦克风（实机踩过：
+  // 录音中段 10s 无声）。一旦挂起立即恢复并留日志。
+  let closedByUs = false
+  ctx.addEventListener('statechange', () => {
+    console.log(`[player] statechange -> ${ctx.state}`)
+    if (!closedByUs && ctx.state === 'suspended') {
+      ctx.resume().catch((err) => onPlaybackError?.(err))
+    }
+  })
   let playhead = 0
   return {
     enqueue(bytes) {
       try {
+        if (ctx.state === 'suspended') {
+          ctx.resume().catch(() => {})
+        }
         const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
         const frames = bytes.byteLength / 2
         const buffer = ctx.createBuffer(1, frames, SAMPLE_RATE)
@@ -67,6 +80,7 @@ export async function createPlayer(sinkId, { onPlaybackError } = {}) {
       }
     },
     stop() {
+      closedByUs = true
       ctx.close()
     },
   }

@@ -89,9 +89,9 @@ node tools/gen-icons.mjs     # 已运行一次，4 个尺寸的 PNG 已提交
 | AC ID | Status | Proof | 实机口径 | Files | Notes |
 | --- | --- | --- | --- | --- | --- |
 | AC-101 | pass | `AC-142/AC-101/AC-143 冷启动…`、`AC-121 badgeFor` | automated-pass（时限 manual-pending） | `src/extension/background.js`、`src/shared/runtime-state.mjs` | 自动化覆盖 `starting → on`、两方向 running、`server.port` 等于 ready 帧端口、绿/琥珀角标；「5 s 内」与弹窗观感留手测 4 |
-| AC-102 | pass | `AC-102 关闭同传…` | automated-pass（音频连续性 manual-pending） | `background.js`、`offscreen.js` | 自动化覆盖 phase→off、bridge 保持 connected、`li:stop`、宿主端口断开并收到 `shutdown`、离屏文档保留、灰点、不通知；`pgrep` 与耳机/16ch 不断声留手测 8 |
+| AC-102 | deferred | 见 AC-147 | — | `background.js` | 已由 AC-147 取代（2026-09-10 实机反馈）：关闭同传现在连桥与离屏文档一起释放，原「桥保持 connected」断言按新设计不再成立 |
 | AC-103 | pass | `AC-103 重开弹窗直接从 storage 渲染…`、`AC-106 面板只渲染 storage…` | automated-pass（音频连续性 manual-pending） | `panel.js` | 自动化覆盖「只读 storage 渲染、打开弹窗不发任何消息」；关弹窗 60 s 再开且声音不断留手测 6 |
-| AC-104 | pass | `AC-104 过渡态收到 li:power 一律 busy…` | automated-pass | `background.js`、`panel.js`、`panel.css` | 三种过渡态都回 `{ok:false, reason:'busy'}` 且 runtime 快照不变；按钮禁用与转圈由 `tone==='progress'` 驱动（AC-128 已静态检查动画） |
+| AC-104 | pass | `AC-104 过渡态：开启中再点开启、关闭中再点任何按钮都是 busy，且 runtime 不变` | automated-pass | `background.js` | 「开启中收到 li:power {on:false} 为 busy」已由 AC-146（取消）取代；开启中再点开启、关闭中任何点击仍回 busy 且 runtime 不变 |
 | AC-105 | pass | `AC-105/AC-138 宿主不可用…`、`AC-105 建桥失败…`、`native-errors.test.mjs` 4 条 | automated-pass | `background.js`、`src/shared/native-errors.mjs`、`errors.mjs` | 覆盖宿主未安装、宿主启动即退出、超时兜底、建桥失败；error 态直接重试成功 |
 | AC-106 | pass | `AC-106 面板只渲染 storage…` | automated-pass | `panel.js` | 禁词表 + 禁止对 `meetingMuted`/`bridge`/`startStep` 出现任何判定；只允许发三种消息 |
 | AC-107 | pass | `AC-107 默认计划即方向表…`、`AC-107 两个目标语言…` | automated-pass | `src/shared/direction-plan.mjs`、`directions.mjs` | 含「不与 DIRECTIONS 共享引用」 |
@@ -125,16 +125,22 @@ node tools/gen-icons.mjs     # 已运行一次，4 个尺寸的 PNG 已提交
 | AC-135 | pass | `AC-135 语言目录…`、`AC-135 原声是第 14 个选项…`、`AC-135 接线层不含语言码…`、`AC-126/AC-135 两个下拉…` | automated-pass | `src/shared/languages.mjs` | 13 个码作为集合与上游文档一致；五个接线文件逐个扫语言码与标签字面量 |
 | AC-136 | pass | `AC-136 直通约束…`、`AC-136/AC-119 离屏的直通约束…`、`AC-136 UI 层不得存在「只建桥不翻译」的入口`、`AC-142/AC-101/AC-143 冷启动…`、`AC-136 li:connect：两方向各一条直通路…`、`AC-136 li:connect 幂等…`、`AC-136 createPlayer 失败…`（离屏侧） | automated-pass（实机 manual-pending） | `src/shared/audio-routing.mjs`、`offscreen.js`、`panel.js`、`options.js` | 自动化覆盖两种约束、离屏只有一处 `getUserMedia`、UI 无 `li:connect`、建桥完成前未 `connectNative`；Review r1 补离屏侧运行时证明：两方向各一条 `MediaStreamSource → floorGain(1.0) → 已 setSinkId 的 destination`、约束分别来自 `buildFloorConstraints(id,'capture'/'mic')`、建桥阶段不起采集、`li:connect` 幂等、失败时释放 stream。「直通延迟 < 50 ms」「耳机听到原声」仍留手测 1/12 与上游验证项 |
 | AC-137 | pass | `floor.test.mjs` 3 条、`AC-137 衬底增益：ramp 平滑…`、`AC-137 衬底不得在上下文时钟头 0.7 s 里误判「正在播译文」`（离屏侧） | automated-pass（听感 manual-pending） | `src/shared/floor.mjs`、`audio.js` | 纯函数逐项验证；静态确认用 `linearRampToValueAtTime` 且目标值只来自 `floorTarget`/`isTranslating`；Review r1 补运行时用例：`attachFloor` 之后增益为 1、喂译文后压低、`flush`（撤翻译层/暂停）后立即回 1.0——含首轮被漏掉的「上下文时钟头 0.7 s」窗口。实际压低/恢复听感留手测 4 |
-| AC-138 | pass | `AC-105/AC-138 宿主不可用…`、`AC-120/AC-138 桥失败时…`、`AC-138/AC-141 failureCopy…` | automated-pass（音频连续性 manual-pending） | `background.js`、`runtime-state.mjs` | 自动化覆盖 bridge 保持 connected、离屏文档仍在、native 端口已断、通知正文等于 `failureCopy(...)`；「player 与直通 stream 引用不变、增益回 1.0」留手测 9 |
+| AC-138 | deferred | 见 AC-148 | — | `background.js`、`runtime-state.mjs` | 已由 AC-148 取代：翻译层失败现在连桥一起释放，正文不再含「原声仍在直通」 |
 | AC-139 | pass | `AC-139 浏览器刚启动…`、`AC-122/AC-139 planRecovery…`、`AC-122/AC-139 顶层与钩子…` | automated-pass（实机 manual-pending） | `background.js`、`runtime-state.mjs` | 自动化覆盖顶层与 onInstalled/onStartup 零占用、planRecovery 永不返回 connect/start；macOS 橙色麦克风指示留手测 3 |
-| AC-140 | pass | `AC-140 断开会议音频…`、`AC-140 关离屏文档掉 keepalive 端口不得被误判成桥丢失…`、`AC-140 li:disconnect：撤翻译层后停全部播放器与直通 track`（离屏侧） | automated-pass（实机 manual-pending） | `background.js`、`offscreen.js` | 自动化覆盖先撤翻译层再撤桥、closeDocument、runtime 回初始并保留 meetingMuted、角标清空；Review r1 补「关文档掉 keepalive 端口的最坏次序下全程零通知、终态 disconnected」（major 4）与离屏侧「player 全关、会话全关、直通 track 全部 `readyState === 'ended'`」——后者此前只能靠手测 12 |
-| AC-141 | pass | `AC-141 桥丢失…`、`AC-141 devicechange 不循环…`、`AC-138/AC-141 failureCopy…`、`AC-141 桥失败必须通知离屏收尾翻译层…`、`AC-141/AC-105 classifyMediaError…`、`AC-133 直通 track 被系统结束 → 上报 bridge-lost…`（离屏侧） | automated-pass（实机 manual-pending） | `background.js`、`offscreen.js`、`src/shared/errors.mjs` | 自动化覆盖桥失败通知、宿主退出、离屏保留、重试恰一次、连发 5 次 devicechange 不循环；Review r1 补：桥失败必须发 `li:stop` 让离屏收尾（major 3）、媒体 DOMException 按名字归类（否则 `device_missing` 的自动重试永不触发，minor 8）、离屏对 `devicechange` 只上报不自作主张、直通 track 被结束时上报 `bridge-lost`。拔插耳机仍留手测 11 |
+| AC-140 | deferred | 见 AC-147、AC-149 | — | `background.js`、`panel.js` | 已由 AC-147、AC-149 取代：不再有「断开会议音频」入口，关闭即释放 |
+| AC-141 | pass | `AC-148 桥丢失：撤掉一切（含离屏文档）+ 通知；设备变化不会自动占用麦克风`、`AC-122 离屏长连接断开…` | automated-pass（拔插 manual-pending） | `background.js`、`offscreen.js` | 前半（bridge-lost → bridgeFailed + 撤宿主 + 通知）仍有效，离屏文档现在一并关闭；后半 devicechange 自动重试已由 AC-148 取代并删除 |
 | AC-142 | pass | `AC-142/AC-101/AC-143 冷启动…`、`AC-120/AC-142 requestStart…`、`AC-127/AC-142 statusCopy 三段步骤`、`AC-119/AC-142 没有字段赋值` | automated-pass（视觉 manual-pending） | `background.js`、`runtime-state.mjs`、`panel.js` | 自动化断言发 `li:connect` 时 `startStep==='bridge'`、发 `li:start` 时 `==='translation'`、结束时为 null，且 `background.js` 无 `startStep =` 赋值；转圈观感留手测 4/8 |
 | AC-143 | pass | `AC-142/AC-101/AC-143 冷启动…`、`AC-143 readyCopy…`、`AC-132/AC-144 …就绪通知静音文案`、`AC-143 li:start：每个 translate 方向都 open 且 startCapture 返回后才回 ok`、`AC-143 在途启动可作废…`、`AC-143 就绪判定…`（静态） | automated-pass（通知显示 manual-pending） | `offscreen.js`、`runtime-state.mjs`、`background.js` | readyCopy 三种形态逐字比对。就绪判定「等 open + 采集返回」首轮只有手测承诺，Review r1 补齐运行时证明：假 Web Audio + 可控 open 的假 WebSocket 下，断言 open 之前不得 startCapture、只有一个方向就绪时不得回 ok、两方向都 open 后才回 `running`，并加静态守卫（等 open 必须排在 `startCapture(` 之前）。macOS 通知实际显示仍留手测 4 |
 | AC-144 | pass | `AC-144 Meet 探测脚本只读…`、`AC-144/AC-119 静音判定…`、`AC-131/AC-144 没有 tabs 权限时 sender.tab.url 被裁掉…` | automated-pass | `meet-mute.js`、`background.js` | 17 个禁用 API 逐个扫 + 上报必须接住 Promise；SW 侧的来源校验现在是 `sender.tab?.url` 与 `sender.url` 双判（见「Review round 1 修复」第 1 条），新增用例专门喂「`tab.url` 被裁掉、只剩 `tab.id` 与 `url`」的 sender 形态 |
 | AC-145 | pass | `AC-145 通知只在三处发出…`、`AC-145 通知契约…`、集成测试里三处通知的 id/title/message 逐条断言 | automated-pass（macOS 显示 manual-pending） | `background.js`、`runtime-state.mjs` | 自动化确认恰好三处 `chrome.notifications.create`、id 与正文来源；macOS 通知中心实际显示留手测 4/9 |
 
 汇总：**45 条 AC 全部有自动化证据（automated-pass）**，其中 20 条另有需要真实设备/浏览器才能确认的部分，已在 Notes 里点名对应的手测项。没有 `not-met` 或 `blocked`。
+
+| AC-146 | pass | `AC-146 开启途中取消（第一步）…`、`（第二步）…`、`（第三步）…`、`AC-127/AC-142/AC-146 statusCopy…`、`AC-146/AC-150 开启可取消、关闭即释放…` | automated-pass（实机橙色指示 manual-pending） | `background.js`、`runtime-state.mjs`、`panel.js` | 三段步骤各自取消都立即回复 ok、回到初始、关闭离屏文档、断开未就绪的宿主端口、不发通知；迟到应答不改状态；取消后可立刻重开 |
+| AC-147 | pass | `AC-147 关闭同传：…全部释放…`、`AC-147 关闭时关离屏文档必然掉 keepalive 端口…`、`AC-147/AC-149 关闭保留会议静音态…`、`AC-120/AC-147/AC-148 …终态都不留桥` | automated-pass（实机橙色指示 manual-pending） | `background.js`、`runtime-state.mjs` | 关闭后回到初始、离屏文档关闭、宿主退出、无角标、不通知；这正是用户实机发现「关闭后仍开麦」的修复 |
+| AC-148 | pass | `AC-105/AC-148 宿主不可用…`、`AC-105 建桥失败…`、`AC-148 桥丢失…`、`AC-123/AC-148 翻译层掉线…`、`AC-105/AC-148 改语言时重建失败…`、`AC-122 SW 唤醒后的恢复…`、`AC-148 failureCopy…` | automated-pass | `background.js`、`runtime-state.mjs` | 翻译失败终态 bridge=disconnected、桥失败终态 bridge=failed，二者都关离屏文档、撤宿主、各一条通知；devicechange 不触发任何动作 |
+| AC-149 | pass | `AC-127/AC-149 statusCopy：已关闭 / 桥失败…`、`AC-126/AC-149 面板不含被否决的入口…`、`AC-121/AC-147 badgeFor…` | automated-pass | `runtime-state.mjs`、`panel.js`、`popup.html`、`sidepanel.html` | 无断开入口、无「原声直通」文案、已关闭正文说明不占麦、未开启无角标 |
+| AC-150 | pass | `AC-146/AC-150 开启可取消、关闭即释放：SW 的接线纪律`、`AC-123/AC-148 …都经 releaseAll 撤掉一切` | automated-pass（静态） | `background.js` | UI 处理器只剩两种消息；四条收尾路径都经 releaseAll；每个长等待都挂取消令牌 |
 
 ## 无法在本环境执行的验证（留给实机）
 
@@ -393,6 +399,34 @@ node tools/gen-icons.mjs     # 已运行一次，4 个尺寸的 PNG 已提交
 ### reviewer 的可选建议（未做）
 
 - 建议 `panel.js` 在模块加载时 `chrome.windows.getCurrent()` 缓存 `windowId`、点击处理器同步用缓存值调用 `chrome.sidePanel.open({ windowId })`。**未做**：`tests/unit/extension-static.test.mjs` 的 `AC-128 「停靠到侧栏」必须同步调用 sidePanel.open…` 里有一条既有断言 `assert.ok(/windowId: chrome\.windows\.WINDOW_ID_CURRENT/.test(dock))`，照建议改必须改掉它，与本轮「既有断言不改」的约束直接冲突（建议本身也只是 SHOULD 级的稳妥性改进，不是缺陷）。现状用 `WINDOW_ID_CURRENT` 哨兵，不丢用户手势、不需要额外权限；哨兵能否被 `sidePanel.open` 接受仍留实机手测确认（Remaining Work 里已有「点『停靠』能打开侧栏」这一项）。
+
+## 实机反馈修改（2026-09-10）
+
+用户在真实 Chrome 里加载扩展、开启一次（real 后端，宿主日志显示冷启动 6 ms、会话 22 s）后提出两点：
+
+1. **开启中不能取消**：开启要走三步，按钮全程禁用。改为开启中主按钮是可点的「取消开启」（描边、带转圈、步骤文案照常）。
+2. **关闭后麦克风仍在用**：原设计「关闭同传只撤翻译、音频桥保留直通」让 macOS 橙色麦克风指示在关闭后仍亮着。用户明确要求关闭即不开麦，于是关闭、取消、任何失败都撤掉宿主、翻译层、桥与离屏文档。随之取消「断开会议音频」入口、「原声直通中」状态与 devicechange 自动重连（后者会在非开启状态下重新占麦）。
+
+**代价（已写进选项页与 README）**：关闭后插件不再转送任何声音；会议里的麦克风若仍选着 BlackHole 16ch，对方听不到你。
+
+### 改动
+
+| 文件 | 改动 |
+| --- | --- |
+| `src/shared/runtime-state.mjs` | `stopped`、`failed` 的终态不留桥；`planRecovery` 对任何半启动都按失败收尾；`statusCopy` 返回按钮 `action/variant/spinner/lockFields`，去掉 `secondary`；文案去掉断开与原声直通 |
+| `src/extension/background.js` | 新增 `releaseAll`（撤宿主 → `li:disconnect` → 关离屏文档 → 在关文档窗口内落终态）；新增 `cancelStart` 与开启取消令牌（`beginStart`、`checkpoint`、`withTimeout(…, run)`）；未就绪的宿主端口也能断开；删除 `li:disconnect` UI 处理、`disconnectAll`、devicechange 重试 |
+| `src/extension/panel.js`、`popup.html`、`sidepanel.html`、`panel.css` | 主按钮按 `copy.action` 发消息（取消与关闭都是 `li:power {on:false}`）；去掉断开链接 |
+| `src/extension/options.html` | 说明关闭即释放麦克风，以及关闭后对方听不到你的条件 |
+| 测试 | `runtime-state.test.mjs`、`background-flow.test.mjs`（新增三条取消用例，改写关闭/失败用例）、`extension-static.test.mjs`（新增 AC-146/AC-150 接线纪律） |
+
+### 验证
+
+| Check | Command / Method | Result |
+| --- | --- | --- |
+| 全量测试 | `npm test` | 174 / 174 通过 |
+| 定点变异 | 取消改回 busy / 宿主等待不挂取消令牌 / 不断开未就绪宿主端口 / 被取消的开启走失败流程 / 关闭不关离屏文档 | 各自让对应用例转红（1、1、1、3、10 条） |
+| 构建 | `npm run build:ext` | 通过，`dist/extension` 已更新 |
+| 实机 | 关闭后橙色麦克风指示消失；三段步骤任一处取消 | 待用户在 `chrome://extensions` 点扩展卡片的刷新后验证 |
 
 ## Blockers
 

@@ -148,7 +148,7 @@
       <button class="action" id="probe" type="button">检测本地服务</button>
       <div class="conclusion" id="probe-result" style="margin-top: 10px" hidden></div>
       <div class="note">
-        本地服务只在同传开启期间存在，关闭同传即退出。首次使用请在项目目录运行
+        本地服务只在同传开启期间存在，关闭同传即退出，同时释放麦克风与音频设备。首次使用请在项目目录运行
         <code>npm run install:host</code>；升级 Node 后需要重新运行一次。
       </div>
     </section>
@@ -165,6 +165,7 @@
         <li>当你说的话已经是「对方听的语言」时，模型可能不出声——此时对方听到的是你 100% 的原声。</li>
         <li>译文比原声晚一到两秒，所以每句开头会先听到一小段未压低的原声。</li>
         <li>建议戴耳机：外放时你的麦克风会把对方的声音再送回会议，容易产生回声。</li>
+        <li>关闭同传后插件不再转送任何声音：会议里的麦克风若仍选着 BlackHole 16ch，对方会听不到你，需要原声通话时请在会议设置里切回真实麦克风。</li>
       </ul>
     </section>
 

@@ -115,14 +115,14 @@ test('AC-120/AC-142 requestStart 的起始步骤取决于桥是否已连接', ()
   assert.deepEqual(s.languages, LANGS)
   assert.equal(s.since, 7)
 
-  // error 态可直接重试
+  // error 态可直接重试；失败时桥已一并撤掉，所以重试从第一步开始
   const retried = requestStart(failed(s, ERR))
   assert.equal(retried.phase, 'starting')
   assert.equal(retried.error, null)
-  assert.equal(retried.startStep, 'host', '桥还在，重试从第二步开始')
+  assert.equal(retried.startStep, 'bridge', '失败即释放桥，重试从连接会议音频开始')
 })
 
-test('AC-120/AC-138 桥失败时把翻译层一并打停，桥成功/失败都不被翻译层改写', () => {
+test('AC-120/AC-147/AC-148 桥失败把翻译层一并打停；关闭、取消、翻译失败的终态都不留桥', () => {
   const s = onState()
   const after = bridgeFailed(s, DEVICE_ERR)
   assert.equal(after.bridge, 'failed')
@@ -141,14 +141,17 @@ test('AC-120/AC-138 桥失败时把翻译层一并打停，桥成功/失败都�
   assert.equal(idleFailed.phase, 'off')
   assert.equal(idleFailed.error, null)
 
-  // 翻译层失败 / 停止都不改 bridge（AC-138 的核心：桥是底）
-  assert.equal(failed(onState(), ERR).bridge, 'connected')
-  assert.equal(stopped(requestStop(onState())).bridge, 'connected')
-  const stoppedState = stopped(requestStop(onState()))
-  assert.equal(stoppedState.phase, 'off')
-  assert.deepEqual(stoppedState.directions, createInitialRuntime().directions)
-  assert.equal(stoppedState.server, null)
-  assert.equal(stoppedState.since, null)
+  // 非开启状态不占用设备：翻译层失败与关闭的终态里桥一律是 disconnected（AC-147/AC-148）
+  const failedState = failed(meetingMute(onState(), true), ERR)
+  assert.deepEqual(failedState, { ...createInitialRuntime(), meetingMuted: true, phase: 'error', error: ERR })
+  const stoppedState = stopped(requestStop(meetingMute(onState(), true)))
+  assert.deepEqual(stoppedState, { ...createInitialRuntime(), meetingMuted: true }, '关闭回到初始，只保留会议静音态')
+  // 开启途中取消（AC-146）：starting → stopping → 初始，不论桥走到了哪一步
+  for (const midway of [requestStart(createInitialRuntime()), connectRequested(requestStart(createInitialRuntime())), hostReady(bridgeConnected(connectRequested(requestStart(createInitialRuntime()))))]) {
+    const stopping = requestStop(midway)
+    assert.equal(stopping.phase, 'stopping', `从 startStep=${midway.startStep} 取消必须先进入 stopping`)
+    assert.deepEqual(stopped(stopping), createInitialRuntime())
+  }
   // bridgeFailed 只从 connecting / connected 出发
   const never = createInitialRuntime()
   assert.equal(bridgeFailed(never, ERR), never)
@@ -199,7 +202,7 @@ test('AC-109 planApplied 只更新给到的方向与语言', () => {
   assert.equal(latency(on, { ms: 1234 }).latencyMs, 1234)
 })
 
-test('AC-121 badgeFor：失败 > 过渡 > 静音 > 同传 > 已连接 > 未连接', () => {
+test('AC-121/AC-147 badgeFor：失败 > 过渡 > 静音 > 同传 > 未开启（未开启一律无角标）', () => {
   const initial = createInitialRuntime()
   const connecting = connectRequested(initial)
   const connected = bridgeConnected(connecting)
@@ -212,7 +215,8 @@ test('AC-121 badgeFor：失败 > 过渡 > 静音 > 同传 > 已连接 > 未连�
 
   assert.deepEqual(badgeFor(initial), { text: '' })
   assert.deepEqual(badgeFor(connecting), { text: '…', color: BADGE_COLORS.idle })
-  assert.deepEqual(badgeFor(connected), { text: '●', color: BADGE_COLORS.idle })
+  assert.deepEqual(badgeFor(connected), { text: '' }, '桥不会脱离同传单独存在，未开启一律无角标')
+  assert.deepEqual(badgeFor(stopped(requestStop(on))), { text: '' })
   assert.deepEqual(badgeFor(starting), { text: '…', color: BADGE_COLORS.idle })
   assert.deepEqual(badgeFor(on), { text: '●', color: BADGE_COLORS.live })
   assert.deepEqual(badgeFor(onMuted), { text: '●', color: BADGE_COLORS.muted })
@@ -250,6 +254,13 @@ test('AC-122/AC-139 planRecovery：四种条件逐项相等，且绝不要求占
   assert.deepEqual(planRecovery({ runtime: bridgeFailed(connected, ERR), hasNativePort: false, hasOffscreen: true }), {
     action: 'none',
   })
+  // SW 在开启刚开始、桥还没动时被终止：同样按失败收尾，不留卡死的「正在开启」
+  for (const hasOffscreen of [true, false]) {
+    assert.deepEqual(planRecovery({ runtime: requestStart(initial), hasNativePort: false, hasOffscreen }), {
+      action: 'fail-translation',
+      error: { category: 'api_error', message: RECOVERY_HALF_DONE },
+    })
+  }
 
   // 任何返回值都不得要求建桥或开启翻译（否则就是未经用户触发的占用）
   const actions = new Set()
@@ -298,11 +309,11 @@ test('AC-143 readyCopy：两方向 translate / 已静音 / 原声方向', () => 
   assert.ok(readyCopy({ plan: ja, meetingMuted: false }).includes('翻成한국어送进会议'))
 })
 
-test('AC-138/AC-141 failureCopy：翻译失败说明原声仍在，桥失败说明会议不可用', () => {
-  assert.equal(failureCopy({ kind: 'translation', error: ERR, bridge: 'connected' }), '出错了。原声仍在直通。')
-  assert.equal(failureCopy({ kind: 'translation', error: ERR, bridge: 'disconnected' }), '出错了。')
-  assert.equal(failureCopy({ kind: 'bridge', error: DEVICE_ERR }), '缺设备。会议现在听不到你，你也听不到会议。')
-  assert.doesNotThrow(() => failureCopy({}))
+test('AC-148 failureCopy：失败后插件已撤掉一切，正文只说明原因（标题区分桥失败与翻译失败）', () => {
+  assert.equal(failureCopy({ kind: 'translation', error: ERR, bridge: 'connected' }), '出错了。')
+  assert.equal(failureCopy({ kind: 'translation', error: ERR }), '出错了。')
+  assert.equal(failureCopy({ kind: 'bridge', error: DEVICE_ERR }), '缺设备。')
+  assert.equal(failureCopy({}), '')
 })
 
 test('AC-145 通知契约：三处通知的 id 与标题固定', () => {
@@ -314,20 +325,28 @@ test('AC-145 通知契约：三处通知的 id 与标题固定', () => {
   assert.equal(NOTIFY.bridgeFailed.title, '无法连接会议音频')
 })
 
-test('AC-127 statusCopy：未连接 / 桥失败 / 已连未翻译', () => {
+test('AC-127/AC-149 statusCopy：已关闭 / 桥失败；没有「断开」入口', () => {
   const plan = buildDirections({ hear: 'zh', partnerHears: 'en' })
   const off = statusCopy({ ...createInitialRuntime(), plan })
   assert.equal(off.title, '同传已关闭')
-  assert.ok(off.body.includes('未连接会议音频'))
+  assert.equal(
+    off.body,
+    '开启后，对方说的话会翻成你要听的语言进你的耳机，你说的话会翻译后送进会议。关闭时插件不占用麦克风，也不转送会议声音。'
+  )
   assert.equal(off.primary, '开启同传')
-  assert.equal(off.secondary, null)
+  assert.equal(off.action, 'start')
+  assert.equal(off.variant, 'solid')
+  assert.equal(off.spinner, false)
+  assert.equal(off.lockFields, false)
+  assert.ok(!('secondary' in off), '面板不再有「断开会议音频」次入口')
   assert.equal(off.stepText, null)
 
   const bridgeDown = statusCopy({ ...bridgeFailed(bridgeConnected(connectRequested(createInitialRuntime())), DEVICE_ERR), plan })
   assert.equal(bridgeDown.title, '无法连接会议音频')
   assert.equal(bridgeDown.tone, 'danger')
-  assert.equal(bridgeDown.body, '缺设备。会议现在听不到你，你也听不到会议。')
+  assert.equal(bridgeDown.body, '缺设备。')
   assert.equal(bridgeDown.primary, '开启同传')
+  assert.equal(bridgeDown.action, 'start')
   assert.equal(bridgeDown.hint.label, '音频设置')
 
   const permission = statusCopy({
@@ -339,29 +358,34 @@ test('AC-127 statusCopy：未连接 / 桥失败 / 已连未翻译', () => {
   })
   assert.equal(permission.hint.label, '去授权麦克风')
 
-  const idle = statusCopy({ ...bridgeConnected(connectRequested(createInitialRuntime())), plan })
-  assert.equal(idle.title, '同传已关闭')
-  assert.ok(idle.body.includes('原声直通中'))
-  assert.equal(idle.primary, '开启同传')
-  assert.equal(idle.secondary, '断开会议音频')
+  // 桥不会脱离同传单独存在；即便出现也按已关闭渲染，绝不展示「原声直通」这种关闭后仍占麦的状态
+  const orphan = statusCopy({ ...bridgeConnected(connectRequested(createInitialRuntime())), plan })
+  assert.deepEqual(orphan, off)
 })
 
-test('AC-127/AC-142 statusCopy：开启中三段步骤文案与关闭中', () => {
+test('AC-127/AC-142/AC-146 statusCopy：开启中三段步骤文案 + 可点的「取消开启」；关闭中不可点', () => {
   const plan = buildDirections({ hear: 'zh', partnerHears: 'en' })
   const steps = { bridge: '正在连接会议音频…', host: '正在启动本地翻译服务…', translation: '正在连接翻译服务…' }
   assert.deepEqual(STEP_TEXT, steps)
   for (const [startStep, stepText] of Object.entries(steps)) {
     const copy = statusCopy({ ...createInitialRuntime(), phase: 'starting', startStep, plan })
-    assert.equal(copy.primary, '正在开启…')
+    assert.equal(copy.title, '正在开启同传')
+    assert.equal(copy.primary, '取消开启')
+    assert.equal(copy.action, 'cancel', '开启中主按钮必须可点，用来取消')
+    assert.equal(copy.spinner, true)
+    assert.equal(copy.variant, 'outline')
+    assert.equal(copy.lockFields, true)
     assert.equal(copy.stepText, stepText)
     assert.equal(copy.tone, 'progress')
+    assert.ok(copy.body.includes('可随时取消'))
   }
-  const connecting = statusCopy({ ...connectRequested(createInitialRuntime()), plan })
-  assert.equal(connecting.primary, '正在开启…')
-  assert.equal(connecting.stepText, steps.bridge)
 
   const stopping = statusCopy({ ...requestStop(onState()), plan })
   assert.equal(stopping.primary, '正在关闭…')
+  assert.equal(stopping.action, null, '关闭中按钮不可点')
+  assert.equal(stopping.spinner, true)
+  assert.equal(stopping.lockFields, true)
+  assert.ok(stopping.body.includes('释放麦克风'))
 })
 
 test('AC-127 statusCopy：进行中 / 已静音 / 静音未知 / 恢复中 / 翻译失败', () => {
@@ -371,7 +395,10 @@ test('AC-127 statusCopy：进行中 / 已静音 / 静音未知 / 恢复中 / 翻
   assert.equal(on.body, '对方说的会翻成中文进你的耳机，你说的话会翻成 English 送进会议。翻译播放时原声会压低。')
   assert.equal(on.tone, 'live')
   assert.equal(on.primary, '关闭同传')
-  assert.equal(on.secondary, '断开会议音频')
+  assert.equal(on.action, 'stop')
+  assert.equal(on.variant, 'outline')
+  assert.equal(on.spinner, false)
+  assert.ok(!('secondary' in on))
   assert.equal(on.note, null)
 
   const muted = statusCopy({ ...meetingMute(onState(), true), plan })
@@ -393,6 +420,7 @@ test('AC-127 statusCopy：进行中 / 已静音 / 静音未知 / 恢复中 / 翻
   const errored = statusCopy({ ...failed(onState(), ERR), plan })
   assert.equal(errored.title, '无法开启同传')
   assert.equal(errored.tone, 'danger')
-  assert.equal(errored.body, '出错了。原声仍在直通。')
+  assert.equal(errored.body, '出错了。')
   assert.equal(errored.primary, '开启同传')
+  assert.equal(errored.action, 'start')
 })

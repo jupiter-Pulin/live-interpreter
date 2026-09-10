@@ -357,21 +357,6 @@ select option {
   text-align: center;
 }
 
-.disconnect {
-  align-self: center;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--faint);
-  font-size: 12px;
-  text-decoration: underline;
-  cursor: pointer;
-}
-
-.disconnect:hover {
-  color: var(--text);
-}
-
 [hidden] {
   display: none !important;
 }

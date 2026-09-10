@@ -5,13 +5,13 @@ import { tmpdir } from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import path from 'node:path'
 import { buildDirections, DEFAULT_SETTINGS } from '../../src/shared/direction-plan.mjs'
-import { readyCopy, failureCopy, BADGE_COLORS } from '../../src/shared/runtime-state.mjs'
+import { readyCopy, BADGE_COLORS, createInitialRuntime } from '../../src/shared/runtime-state.mjs'
 import { USER_MESSAGES } from '../../src/shared/errors.mjs'
 
 // service worker 的编排流程整体验证：用假的 chrome API 与假的离屏文档跑真正的
 // background.js。真实音频图（getUserMedia / AudioContext / setSinkId）只能实机验证，
-// 这里覆盖的是它上面的全部编排：冷启动分步、就绪与失败通知、桥与翻译层的隔离、
-// Meet 静音暂停与恢复、断开、SW 唤醒后的恢复分派。
+// 这里覆盖的是它上面的全部编排：冷启动分步、开启途中取消、就绪与失败通知、
+// 关闭与失败时撤掉一切（不占麦克风）、Meet 静音暂停与恢复、SW 唤醒后的恢复分派。
 //
 // 加载方式：background.js 里的 '/shared/x.mjs' 是扩展根绝对路径，Node 解析不了，
 // 因此把 import 说明符改写成本仓库的 file:// 路径后再 import——除说明符外一字不改。
@@ -281,7 +281,7 @@ test('AC-125 启动令牌只在内存：storage 里既没有它也没有 runtime
   assert.equal(JSON.stringify(env.storage.local).includes('runtime'), false, '运行态不得进 storage.local')
 })
 
-test('AC-102 关闭同传：撤翻译层与宿主，桥与直通保持，不发通知', async () => {
+test('AC-147 关闭同传：宿主、翻译层、桥与离屏文档全部释放，回到初始，不发通知', async () => {
   const env = createEnv()
   await loadBackground(env)
   await powerOn(env)
@@ -289,24 +289,16 @@ test('AC-102 关闭同传：撤翻译层与宿主，桥与直通保持，不发�
 
   const result = await env.toSw({ type: 'li:power', to: 'sw', on: false })
   assert.deepEqual(result, { ok: true })
-  const runtime = env.runtime()
-  assert.equal(runtime.phase, 'off')
-  assert.equal(runtime.bridge, 'connected', '关闭同传绝不撤桥')
-  assert.equal(runtime.server, null)
-  assert.deepEqual(runtime.directions, {
-    downlink: { status: 'stopped', mode: null },
-    uplink: { status: 'stopped', mode: null },
-  })
-  assert.ok(env.offscreenCalls.some((m) => m.type === 'li:stop'))
-  assert.ok(!env.offscreenCalls.some((m) => m.type === 'li:disconnect'), '关闭同传不得撤桥')
+  assert.deepEqual(env.runtime(), createInitialRuntime(), '关闭后回到初始：桥 disconnected、phase off')
+  assert.ok(env.offscreenCalls.some((m) => m.type === 'li:disconnect'), '关闭必须让离屏停掉会话、采集、播放器与直通 track')
+  assert.equal(env.hasDocument(), false, '离屏文档必须关闭：关闭后插件不占用麦克风')
   assert.equal(env.hostPorts[0].disconnected, true, '宿主端口必须断开')
   assert.deepEqual(env.hostPorts[0].posted, [{ type: 'shutdown' }])
-  assert.equal(env.hasDocument(), true, '离屏文档保留')
-  assert.deepEqual(env.lastBadge(), { text: '●', color: BADGE_COLORS.idle })
-  assert.deepEqual(env.notifications, [], 'stopped 不通知')
+  assert.deepEqual(env.lastBadge(), { text: '' })
+  assert.deepEqual(env.notifications, [], '关闭不通知')
 })
 
-test('AC-104 过渡态收到 li:power 一律 busy，且 runtime 不变', async () => {
+test('AC-104 过渡态：开启中再点开启、关闭中再点任何按钮都是 busy，且 runtime 不变', async () => {
   const env = createEnv()
   let release
   env.offscreen = async (message) => {
@@ -325,18 +317,133 @@ test('AC-104 过渡态收到 li:power 一律 busy，且 runtime 不变', async (
   await settle()
   const snapshot = JSON.stringify(env.runtime())
   assert.equal(env.runtime().phase, 'starting')
-
   assert.deepEqual(await env.toSw({ type: 'li:power', to: 'sw', on: true }), { ok: false, reason: 'busy' })
-  assert.deepEqual(await env.toSw({ type: 'li:power', to: 'sw', on: false }), { ok: false, reason: 'busy' })
-  assert.deepEqual(await env.toSw({ type: 'li:disconnect', to: 'sw' }), { ok: false, reason: 'busy' })
   assert.equal(JSON.stringify(env.runtime()), snapshot, 'busy 期间 runtime 不得变化')
 
   release()
   await pending
+  await settle()
+  assert.equal(env.runtime().phase, 'on')
+
+  // 关闭中：离屏收尾卡住时，再点开启 / 关闭都是 busy
+  let releaseStop
+  env.offscreen = async (message) => {
+    if (message.type === 'li:disconnect') {
+      await new Promise((resolve) => {
+        releaseStop = resolve
+      })
+    }
+    return { ok: true }
+  }
+  const stopping = env.toSw({ type: 'li:power', to: 'sw', on: false })
+  await settle()
+  assert.equal(env.runtime().phase, 'stopping')
+  assert.deepEqual(await env.toSw({ type: 'li:power', to: 'sw', on: true }), { ok: false, reason: 'busy' })
+  assert.deepEqual(await env.toSw({ type: 'li:power', to: 'sw', on: false }), { ok: false, reason: 'busy' })
+  releaseStop()
+  await stopping
+  await settle()
+  assert.deepEqual(env.runtime(), createInitialRuntime())
+})
+
+test('AC-146 开启途中取消（第一步）：卡在连接会议音频时取消，立即回到初始、关闭离屏文档、不发通知', async () => {
+  const env = createEnv()
+  let releaseConnect
+  env.offscreen = async (message) => {
+    if (message.type === 'li:connect') {
+      await new Promise((resolve) => {
+        releaseConnect = resolve
+      })
+      return { ok: true, roles: {}, labels: {} }
+    }
+    if (message.type === 'li:start') return { ok: true, directions: RUNNING }
+    return { ok: true }
+  }
+  await loadBackground(env)
+  void powerOn(env)
+  await settle()
+  assert.deepEqual([env.runtime().phase, env.runtime().startStep], ['starting', 'bridge'])
+
+  const result = await env.toSw({ type: 'li:power', to: 'sw', on: false })
+  assert.deepEqual(result, { ok: true }, '取消必须立刻完成，不得等到连接超时')
+  assert.deepEqual(env.runtime(), createInitialRuntime())
+  assert.ok(env.offscreenCalls.some((m) => m.type === 'li:disconnect'), '在途的建桥必须被离屏作废并收尾')
+  assert.equal(env.hasDocument(), false)
+  assert.equal(env.hostPorts.length, 0, '第一步取消时绝不拉起宿主')
+  assert.deepEqual(env.notifications, [], '取消不是失败，不发通知')
+  assert.deepEqual(env.lastBadge(), { text: '' })
+
+  // 迟到的 li:connect 应答不得把状态拉回去
+  releaseConnect()
+  await settle()
+  assert.deepEqual(env.runtime(), createInitialRuntime())
+  assert.equal(env.hostPorts.length, 0)
+  assert.deepEqual(env.notifications, [])
+
+  // 取消后立刻可以重新开启
+  env.offscreen = async (message) =>
+    message.type === 'li:start' ? { ok: true, directions: RUNNING } : { ok: true, roles: {}, labels: {} }
+  assert.deepEqual(await powerOn(env), { ok: true })
   assert.equal(env.runtime().phase, 'on')
 })
 
-test('AC-105/AC-138 宿主不可用：翻译层 error，桥保持 connected 且通知说明原声仍在直通', async () => {
+test('AC-146 开启途中取消（第二步）：宿主迟迟不就绪时取消，还没 ready 的宿主端口也必须断开', async () => {
+  const env = createEnv()
+  env.connectNative = () => {}
+  await loadBackground(env)
+  void powerOn(env)
+  await settle()
+  assert.deepEqual([env.runtime().phase, env.runtime().startStep], ['starting', 'host'])
+  assert.equal(env.hostPorts.length, 1)
+
+  assert.deepEqual(await env.toSw({ type: 'li:power', to: 'sw', on: false }), { ok: true })
+  assert.equal(env.hostPorts[0].disconnected, true, '否则宿主进程会一直留着')
+  assert.deepEqual(env.hostPorts[0].posted, [{ type: 'shutdown' }])
+  assert.deepEqual(env.runtime(), createInitialRuntime())
+  assert.equal(env.hasDocument(), false)
+  assert.deepEqual(env.notifications, [])
+
+  // 迟到的 ready 不算数；再次开启会拉起新的宿主
+  env.hostPorts[0].emit(READY_FRAME)
+  await settle()
+  assert.deepEqual(env.runtime(), createInitialRuntime())
+  env.connectNative = (port) => port.emit(READY_FRAME)
+  assert.deepEqual(await powerOn(env), { ok: true })
+  assert.equal(env.hostPorts.length, 2)
+  assert.equal(env.runtime().phase, 'on')
+  assert.equal(env.runtime().server.port, READY_FRAME.port)
+})
+
+test('AC-146 开启途中取消（第三步）：连接翻译服务时取消，迟到的就绪不得弹「同传已就绪」', async () => {
+  const env = createEnv()
+  let releaseStart
+  env.offscreen = async (message) => {
+    if (message.type === 'li:connect') return { ok: true, roles: {}, labels: {} }
+    if (message.type === 'li:start') {
+      await new Promise((resolve) => {
+        releaseStart = resolve
+      })
+      return { ok: true, directions: RUNNING }
+    }
+    return { ok: true }
+  }
+  await loadBackground(env)
+  void powerOn(env)
+  await settle()
+  assert.deepEqual([env.runtime().phase, env.runtime().startStep], ['starting', 'translation'])
+
+  assert.deepEqual(await env.toSw({ type: 'li:power', to: 'sw', on: false }), { ok: true })
+  assert.deepEqual(env.runtime(), createInitialRuntime())
+  assert.equal(env.hostPorts[0].disconnected, true)
+  assert.equal(env.hasDocument(), false)
+
+  releaseStart()
+  await settle()
+  assert.deepEqual(env.runtime(), createInitialRuntime())
+  assert.deepEqual(env.notifications, [], '被取消的开启绝不发就绪或失败通知')
+})
+
+test('AC-105/AC-148 宿主不可用：翻译层 error，桥与离屏文档一并释放，通知只说明原因', async () => {
   const env = createEnv()
   env.connectNative = (port) => port.die('Specified native messaging host not found.')
   await loadBackground(env)
@@ -345,7 +452,7 @@ test('AC-105/AC-138 宿主不可用：翻译层 error，桥保持 connected 且�
   assert.equal(result.ok, false)
 
   const runtime = env.runtime()
-  assert.equal(runtime.bridge, 'connected', '桥不受翻译层失败影响')
+  assert.equal(runtime.bridge, 'disconnected', '失败态不占用麦克风：桥一并撤掉')
   assert.equal(runtime.phase, 'error')
   assert.equal(runtime.startStep, null)
   assert.equal(runtime.error.category, 'host_unavailable')
@@ -354,21 +461,19 @@ test('AC-105/AC-138 宿主不可用：翻译层 error，桥保持 connected 且�
     downlink: { status: 'stopped', mode: null },
     uplink: { status: 'stopped', mode: null },
   })
-  assert.equal(env.hasDocument(), true)
+  assert.equal(env.hasDocument(), false, '失败后离屏文档关闭')
+  assert.deepEqual(env.lastBadge(), { text: '!', color: BADGE_COLORS.danger })
 
   assert.equal(env.notifications.length, 1)
   assert.equal(env.notifications[0].id, 'li-failed')
   assert.equal(env.notifications[0].title, '无法开启同传')
-  assert.equal(
-    env.notifications[0].message,
-    failureCopy({ kind: 'translation', error: runtime.error, bridge: 'connected' })
-  )
-  assert.ok(env.notifications[0].message.includes('原声仍在直通。'))
+  assert.equal(env.notifications[0].message, runtime.error.message)
 
-  // 紧接着重试：桥已连，直接从第二步开始
+  // 紧接着重试：从连接会议音频重新开始
   env.connectNative = (port) => port.emit(READY_FRAME)
   assert.deepEqual(await powerOn(env), { ok: true })
   assert.equal(env.runtime().phase, 'on')
+  assert.equal(env.offscreenCalls.filter((m) => m.type === 'li:connect').length, 2)
 })
 
 test('AC-105 建桥失败：只报桥失败一条通知，翻译层同时进入 error', async () => {
@@ -388,81 +493,72 @@ test('AC-105 建桥失败：只报桥失败一条通知，翻译层同时进入 
   assert.equal(runtime.phase, 'error')
   assert.equal(runtime.bridgeError.category, 'device_missing')
   assert.equal(env.hostPorts.length, 0, '第一步就失败时绝不拉起宿主')
+  assert.equal(env.hasDocument(), false, '失败后离屏文档关闭')
   assert.equal(env.notifications.length, 1, '桥失败与翻译失败不得重复通知')
   assert.equal(env.notifications[0].title, '无法连接会议音频')
-  assert.ok(env.notifications[0].message.includes('会议现在听不到你，你也听不到会议。'))
+  assert.equal(env.notifications[0].message, USER_MESSAGES.device_missing)
   assert.deepEqual(env.lastBadge(), { text: '!', color: BADGE_COLORS.danger })
 })
 
-test('AC-141 桥丢失：撤宿主 + 通知；device_missing 时 devicechange 自动重试一次', async () => {
+test('AC-148 桥丢失：撤掉一切（含离屏文档）+ 通知；设备变化不会自动占用麦克风', async () => {
   const env = createEnv()
   await loadBackground(env)
   await powerOn(env)
   env.notifications.length = 0
+  const before = env.offscreenCalls.length
 
-  await env.toSw({
+  const lost = {
     type: 'li:pipeline-event',
     to: 'sw',
     event: 'bridge-lost',
     directionId: 'downlink',
     payload: { category: 'device_missing', message: '耳机没了。' },
-  })
+  }
+  await env.toSw(lost)
 
-  let runtime = env.runtime()
+  const runtime = env.runtime()
   assert.equal(runtime.bridge, 'failed')
   assert.equal(runtime.phase, 'error')
   assert.equal(runtime.bridgeError.message, runtime.error.message)
   assert.equal(env.hostPorts[0].disconnected, true, '桥失败必须一并撤宿主')
-  assert.equal(env.hasDocument(), true, '离屏文档保留以便监听 devicechange')
+  assert.ok(env.offscreenCalls.slice(before).some((m) => m.type === 'li:disconnect'), '离屏必须收尾会话与采集')
+  assert.equal(env.hasDocument(), false, '离屏文档关闭，插件不再占用麦克风')
   assert.equal(env.notifications.length, 1)
   assert.equal(env.notifications[0].title, '无法连接会议音频')
+  assert.equal(env.notifications[0].message, '耳机没了。')
 
-  // 插回设备：自动重试一次并成功
-  const before = env.offscreenCalls.filter((m) => m.type === 'li:connect').length
-  await env.toSw({ type: 'li:pipeline-event', to: 'sw', event: 'devicechange', directionId: null, payload: null })
-  runtime = env.runtime()
-  assert.equal(runtime.bridge, 'connected')
-  assert.equal(env.offscreenCalls.filter((m) => m.type === 'li:connect').length, before + 1, '只重试一次')
-  assert.equal(runtime.phase, 'error', '桥回来了，但翻译层仍需用户重新开启')
-})
-
-test('AC-141 devicechange 不循环：桥仍失败时不再连续重试', async () => {
-  const env = createEnv()
-  env.offscreen = async (message) => {
-    if (message.type === 'li:connect') {
-      return { ok: false, error: { category: 'device_missing', message: '还是没有设备。' } }
-    }
-    return { ok: true }
-  }
-  await loadBackground(env)
-  await powerOn(env)
-  const attemptsAfterStart = env.offscreenCalls.filter((m) => m.type === 'li:connect').length
-
-  for (let i = 0; i < 5; i++) {
+  // 插回设备：不自动重连（重连就会在非开启状态下重新占用麦克风）
+  const callsBefore = env.offscreenCalls.length
+  for (let i = 0; i < 3; i++) {
     await env.toSw({ type: 'li:pipeline-event', to: 'sw', event: 'devicechange', directionId: null, payload: null })
   }
-  const attempts = env.offscreenCalls.filter((m) => m.type === 'li:connect').length
-  assert.equal(attempts, attemptsAfterStart + 1, `连发 5 次 devicechange 只允许重试一次，实际 ${attempts - attemptsAfterStart} 次`)
+  assert.equal(env.offscreenCalls.length, callsBefore, 'devicechange 不得触发任何离屏动作')
+  assert.equal(env.hasDocument(), false)
   assert.equal(env.runtime().bridge, 'failed')
+
+  // 已撤掉的桥迟到的上报不再多弹通知
+  await env.toSw(lost)
+  assert.equal(env.notifications.length, 1)
 })
 
-test('AC-140 断开会议音频：先撤翻译层再撤桥，runtime 回初始，角标清空', async () => {
+
+
+test('AC-147/AC-149 关闭保留会议静音态；SW 不再有只断开桥的入口', async () => {
   const env = createEnv()
   await loadBackground(env)
   await powerOn(env)
   await env.toSw({ type: 'li:meeting-mute', to: 'sw', platform: 'meet', buttons: [{ dataIsMuted: 'true', text: 'mic_off' }] }, { tab: MEET_TAB })
 
-  const result = await env.toSw({ type: 'li:disconnect', to: 'sw' })
-  assert.deepEqual(result, { ok: true })
-  const order = env.offscreenCalls.map((m) => m.type)
-  assert.ok(order.indexOf('li:stop') < order.lastIndexOf('li:disconnect'), '必须先撤翻译层再撤桥')
-  assert.equal(env.hasDocument(), false, '离屏文档必须关闭')
-  assert.equal(env.hostPorts[0].disconnected, true)
+  const legacy = await env.toSw({ type: 'li:disconnect', to: 'sw' })
+  assert.equal(legacy, undefined, 'li:disconnect 不再是 SW 接受的消息')
+  assert.equal(env.runtime().phase, 'on')
+  assert.equal(env.hasDocument(), true)
 
+  await env.toSw({ type: 'li:power', to: 'sw', on: false })
   const runtime = env.runtime()
   assert.equal(runtime.bridge, 'disconnected')
   assert.equal(runtime.phase, 'off')
-  assert.equal(runtime.meetingMuted, true, '断开只影响桥，会议静音态保留')
+  assert.equal(runtime.meetingMuted, true, '会议静音态由会议页面决定，关闭不清掉它')
   assert.deepEqual(env.lastBadge(), { text: '' })
 })
 
@@ -576,28 +672,9 @@ test('AC-131/AC-144 没有 tabs 权限时 sender.tab.url 被裁掉，靠 sender.
   assert.equal(env.runtime().meetingMuted, true, '没有 tabId 的上报无法按标签记账，必须忽略')
 })
 
-test('AC-141 桥失败必须通知离屏收尾翻译层，否则会话与采集留着跑', async () => {
-  const env = createEnv()
-  await loadBackground(env)
-  await powerOn(env)
-  const before = env.offscreenCalls.length
 
-  await env.toSw({
-    type: 'li:pipeline-event',
-    to: 'sw',
-    event: 'bridge-lost',
-    directionId: 'downlink',
-    payload: { category: 'device_missing', message: '耳机没了。' },
-  })
 
-  const after = env.offscreenCalls.slice(before).map((m) => m.type)
-  assert.ok(after.includes('li:stop'), `桥失败必须发 li:stop 让离屏撤翻译层，实际：${after}`)
-  assert.ok(!after.includes('li:disconnect'), '桥失败要保留离屏文档以监听 devicechange，不得发 li:disconnect')
-  assert.equal(env.hasDocument(), true)
-  assert.equal(env.runtime().bridge, 'failed')
-})
-
-test('AC-140 关离屏文档掉 keepalive 端口不得被误判成桥丢失：全程零通知', async () => {
+test('AC-147 关闭时关离屏文档必然掉 keepalive 端口，不得被误判成桥丢失：全程零通知', async () => {
   const env = createEnv()
   await loadBackground(env)
   await powerOn(env)
@@ -605,15 +682,15 @@ test('AC-140 关离屏文档掉 keepalive 端口不得被误判成桥丢失：�
   env.notifications.length = 0
 
   // 真实 Chrome 里 closeDocument 必然掉 keepalive 端口；这里让它同步掉，
-  // 把「onDisconnect 先跑、dispatch(disconnected) 后跑」这条最坏次序钉死
+  // 把「onDisconnect 先跑、终态后落盘」这条最坏次序钉死
   env.chrome.offscreen.closeDocument = async () => {
     env.setDocument(false)
     await env.keepalivePort.drop()
   }
 
-  const result = await env.toSw({ type: 'li:disconnect', to: 'sw' })
+  const result = await env.toSw({ type: 'li:power', to: 'sw', on: false })
   assert.deepEqual(result, { ok: true })
-  assert.deepEqual(env.notifications, [], `断开会议音频全程不得发通知，实际：${JSON.stringify(env.notifications)}`)
+  assert.deepEqual(env.notifications, [], `关闭全程不得发通知，实际：${JSON.stringify(env.notifications)}`)
   const runtime = env.runtime()
   assert.equal(runtime.bridge, 'disconnected', '终态必须是 disconnected 而不是 failed')
   assert.equal(runtime.bridgeError, null, '不得落盘 bridgeFailed 的错误')
@@ -655,7 +732,7 @@ test('AC-129 衬底档位改动即时下发；未知键被丢弃', async () => {
   assert.equal(env.storage.local.settings.autoConnect, undefined)
 })
 
-test('AC-123 翻译层掉线：failed + 通知，桥保持，绝不自动重连', async () => {
+test('AC-123/AC-148 翻译层掉线：failed + 通知，桥与离屏文档一并释放，绝不自动重连', async () => {
   const env = createEnv()
   await loadBackground(env)
   await powerOn(env)
@@ -672,16 +749,17 @@ test('AC-123 翻译层掉线：failed + 通知，桥保持，绝不自动重连'
 
   const runtime = env.runtime()
   assert.equal(runtime.phase, 'error')
-  assert.equal(runtime.bridge, 'connected')
+  assert.equal(runtime.bridge, 'disconnected')
   assert.equal(runtime.error.category, 'network_unavailable')
   assert.equal(env.hostPorts[0].disconnected, true)
+  assert.equal(env.hasDocument(), false)
   assert.equal(env.notifications.length, 1)
   assert.equal(env.notifications[0].title, '无法开启同传')
 
   // 再等一会儿，确认没有任何自动重连
   await settle(30)
   const newCalls = env.offscreenCalls.slice(callsBefore).map((m) => m.type)
-  assert.deepEqual(newCalls, ['li:stop'], `失败后只允许撤翻译层，实际：${newCalls}`)
+  assert.deepEqual(newCalls, ['li:disconnect'], `失败后只允许撤掉一切，实际：${newCalls}`)
   assert.equal(env.hostPorts.length, 1, '不得自动重连宿主')
 })
 
@@ -717,8 +795,18 @@ test('AC-122 SW 唤醒后的恢复：离屏没了 → 桥失败；中间态 → 
   })
   await loadBackground(halfway)
   assert.equal(halfway.runtime().phase, 'error')
-  assert.equal(halfway.runtime().bridge, 'connected')
+  assert.equal(halfway.runtime().bridge, 'disconnected', '半启动状态按失败收尾，桥一并撤掉')
+  assert.equal(halfway.hasDocument(), false)
   assert.ok(halfway.notifications[0].message.includes('上次操作未完成'))
+
+  // 开启刚开始、桥还没动时 SW 被终止：同样收尾，不留卡死的「正在开启」
+  const early = createEnv({
+    session: { runtime: { bridge: 'disconnected', phase: 'starting', startStep: 'bridge', meetingMuted: null } },
+    offscreenExists: false,
+  })
+  await loadBackground(early)
+  assert.equal(early.runtime().phase, 'error')
+  assert.equal(early.runtime().startStep, null)
 
   // 桥在、翻译在跑、宿主没了 → 重连宿主并把新端口告诉离屏
   const rehost = createEnv({
@@ -744,7 +832,7 @@ test('AC-122 离屏长连接断开：桥已连时判为文档丢失', async () =
   assert.equal(env.notifications[0].title, '无法连接会议音频')
 })
 
-test('AC-105/AC-132 改语言时重建失败：翻译层 failed + 通知，桥保持', async () => {
+test('AC-105/AC-148 改语言时重建失败：翻译层 failed + 通知，桥与离屏文档一并释放', async () => {
   const env = createEnv()
   await loadBackground(env)
   await powerOn(env)
@@ -758,7 +846,8 @@ test('AC-105/AC-132 改语言时重建失败：翻译层 failed + 通知，桥�
 
   const runtime = env.runtime()
   assert.equal(runtime.phase, 'error')
-  assert.equal(runtime.bridge, 'connected', '重建失败绝不影响桥')
+  assert.equal(runtime.bridge, 'disconnected', '失败态不占用麦克风')
+  assert.equal(env.hasDocument(), false)
   assert.equal(runtime.error.category, 'network_unavailable')
   assert.equal(env.notifications.length, 1)
   assert.equal(env.notifications[0].title, '无法开启同传')

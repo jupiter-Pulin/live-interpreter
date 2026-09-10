@@ -4,6 +4,17 @@
 
 把需要在 `http://localhost:5173/` 手动选设备、分别点「启动下行 / 启动上行 / 解除静音」的网页版，改成 Chrome 扩展。用户点「开启同传」时插件冷启动：连接会议音频（建桥）→ 通过 Native Messaging 拉起本地 Node 翻译服务 → 为两方向建立翻译会话，界面分步转圈，全部就绪后弹系统通知「同传已就绪」。桥是一座常驻的**音频桥**：两方向原声直通，翻译叠在上面——翻译播放时原声压低、停顿时恢复，任何状态不断声；「关闭同传」只撤翻译与本地服务，桥不动；翻译层失败不影响桥。用户在 Google Meet 里静音时，只读探测脚本上报静音态，插件暂停翻译用户的话、继续翻译对方。不自动连接。面板照 `design/extension/Main.dc.html`（弹窗 380×600）与 `Docked.dc.html`（侧栏 360 宽）实现。`OPENAI_API_KEY` 只存在于 Node 进程。语言能力以 OpenAI 官方文档为准：输入自动识别，面板只选两个目标语言（13 种或原声）。网页版及其专用代码、测试一并移除。方案取舍见 `./0-feasibility-study.md`，产品规则与上游限制见 `./1-requirements.md`。
 
+## 变更记录
+
+### 2026-09-10 实机反馈：关闭即释放、开启可取消
+
+实机试用后用户决定两处修改。本节优先于下文中与之冲突的旧表述；旧 AC 编号保留不重排，并在行首标注被哪条新 AC 取代。
+
+1. **关闭即释放**：插件只在同传「开启中 / 进行中 / 关闭中」占用麦克风与音频设备。「关闭同传」、开启途中取消、任何失败（翻译层或桥）的终态，都撤掉宿主、翻译层、桥与离屏文档，macOS 的橙色麦克风指示随之消失。「断开会议音频」入口与「原声直通中」状态取消；桥因缺设备失败后不再在插回设备时自动重连，因为那会在非开启状态下重新占用麦克风。代价：关闭后插件不再转送任何声音，会议里的麦克风若仍选着 BlackHole 16ch，对方听不到你。
+2. **开启可取消**：开启中主按钮是可点的「取消开启」（带转圈，三段步骤文案照常）。点击即作废在途的建桥、宿主与会话，回到「同传已关闭」，不发任何通知，之后可立刻重新开启。
+
+取代关系：AC-102 → AC-147；AC-104 中「开启中收到 `li:power {on:false}` 返回 busy」→ AC-146；AC-138 → AC-148；AC-140 → AC-147、AC-149；AC-141 后半（`devicechange` 自动重试）→ AC-148；AC-126、AC-127 中「原声直通中 / 原声仍在直通 / 断开会议音频 / 正在开启… / 未连接会议音频」等文案 → AC-149；AC-121 中「桥已连未翻译显示灰点」→ AC-149。
+
 ## Context
 
 现状代码流：
@@ -35,14 +46,15 @@
 
 - MUST 不自动连接：连接会议音频、占用麦克风、拉起本地服务只发生在用户点「开启同传」之后；浏览器启动后插件无动作。
 - MUST 开启分步冷启动（连接会议音频 → 启动本地翻译服务 → 连接翻译服务），每步在面板有文案、按钮转圈、角标 `…`；就绪判定为桥已连接且每个翻译方向会话已打开、采集已启动；就绪后弹系统通知「同传已就绪」，正文按实际计划与 Meet 静音态生成；失败亦弹通知说明原因。
-- MUST 桥已连接时两方向原声直通；翻译叠在桥上，翻译播放时直通增益压到 `floorLevel`（0 / 0.25 / 0.5，默认 0.25），译文队列播完 0.7 s 后恢复 1.0；「关闭同传」只撤翻译与宿主；翻译层任何失败都不影响桥。
+- MUST 同传进行中两方向原声直通；翻译叠在桥上，翻译播放时直通增益压到 `floorLevel`（0 / 0.25 / 0.5，默认 0.25），译文队列播完 0.7 s 后恢复 1.0。桥只随同传存在：「关闭同传」、开启途中取消、任何失败都撤掉宿主、翻译层、桥与离屏文档，非开启状态不占用麦克风（2026-09-10 变更）。
 - MUST Meet 静音感知：只读探测脚本上报 `meetingMuted`；翻译中且 `meetingMuted === true` 时暂停上行翻译（不送麦克风音频、丢弃并清空译文、直通保持 1.0），下行不受影响；取消静音即恢复，暂停期间上行会话被对端关闭则自动重建；静音态未知时不暂停并明示。
 - MUST 「开启」时由扩展拉起本地 Node 翻译服务，「关闭」时该进程退出；`OPENAI_API_KEY` 只在 Node 进程；扩展只持有短期凭证与启动令牌。
 - MUST 面板提供「你想听的语言 / 对方听的语言」两个下拉，各为 13 种之一或「原声（不翻译）」，持久化，默认 `zh` / `en`；不提供「你说的语言」。
-- MUST 桥失败与翻译失败分开展示，文案可行动；桥失败时明确告知会议此刻不可用。
+- MUST 桥失败与翻译失败分开展示（标题不同），文案可行动。
+- MUST 开启中可取消：主按钮为「取消开启」，点击即作废在途的建桥、宿主与会话并回到初始，不发通知（2026-09-10 变更）。
 - MUST 不向会议页面注入任何 UI、不改 DOM、不碰媒体轨道；唯一的内容脚本只读取 Meet 麦克风按钮的静音态。
 - MUST 移除网页版：页面、控制器、静态托管、`/api/config`、CLI 入口、`npm start`/`start:real`、`session-state.mjs` 及其专用测试；扩展仍在用的公共能力保留。
-- SHOULD 弹窗可停靠侧栏；选项页承接设备角色、授权、衬底音量、本地服务自检；已连接时有「断开会议音频」。
+- SHOULD 弹窗可停靠侧栏；选项页承接设备角色、授权、衬底音量、本地服务自检。
 
 ## Non-goals
 
@@ -59,10 +71,11 @@
 
 ### Core Invariants
 
-- **原声是底，翻译是顶**：桥已连接时，每个方向始终存在一条直通路（输入设备 → 增益 → 输出设备）；翻译只通过同一输出混入，并只在译文播放期间把直通增益压到 `floorLevel`；用户主动「断开」之外，任何状态变化都不得让直通断开。
-- **用户触发才占用**：浏览器启动、扩展安装、SW 唤醒都不得调用 getUserMedia、创建离屏文档或 `connectNative`；这些只由 `li:power {on:true}` 触发（以及桥因缺设备失败后 `devicechange` 的一次自动重试）；UI 没有只建桥不翻译的入口。
+- **原声是底，翻译是顶**：同传进行中每个方向始终存在一条直通路（输入设备 → 增益 → 输出设备）；翻译只通过同一输出混入，并只在译文播放期间把直通增益压到 `floorLevel`。
+- **非开启不占用**（2026-09-10 变更）：`phase ∉ { starting, on, stopping }` 时不存在离屏文档、getUserMedia 流与宿主进程；关闭、取消、失败统一经 `releaseAll` 撤掉一切后才落终态。
+- **用户触发才占用**：浏览器启动、扩展安装、SW 唤醒都不得调用 getUserMedia、创建离屏文档或 `connectNative`；这些只由 `li:power {on:true}` 触发；UI 没有只建桥不翻译的入口，也没有只断开桥的入口；设备变化不触发任何动作。
 - 判定逻辑只在 `src/shared/`（设备预检、方向计划、语言目录、端点选择、运行态状态机、衬底目标增益、协议帧、错误分类、静音门控 `forwardMicAudio`、Meet 静音态解析）；SW / 离屏 / 面板 / 选项页 / 探测脚本只做接线。
-- 翻译层失败（宿主、凭证、WS、网络）只改变 `phase`，不改变 `bridge`；桥失败（预检、授权、播放上下文丢失、直通 track 结束）同时终止翻译层。
+- 翻译层失败（宿主、凭证、WS、网络、改语言重建、恢复时发现半启动）终态为 `phase = error`、`bridge = disconnected`；桥失败（预检、授权、播放上下文丢失、直通 track 结束、离屏文档丢失）终态为 `bridge = failed`、`phase = error`；两者都已撤掉一切。
 - 暂停上行只改变上行：采集块经 `forwardMicAudio({ muted: uplinkPaused })` 门控、到达的上行译文帧丢弃、上行播放器 `flush()`、上行直通 `holdFloorFull(true)`；下行对象引用与数据流不受任何影响。
 - Meet 探测脚本只读：不创建/修改/删除任何 DOM 节点或样式，不访问网络，不访问媒体设备，只 `querySelector` 与 `MutationObserver` 读取麦克风按钮的 `data-is-muted`，只向本扩展 `sendMessage`。
 - `DIRECTIONS` 由 `buildDirections(DEFAULT_SETTINGS)` 定义，`source` 一律 `'auto'`；`createSession` 不传 `directionTable` 时行为不变。
@@ -84,7 +97,7 @@
 | `src/extension/meet-mute.js` | add | 只读 Meet 静音探测脚本 |
 | `src/extension/audio.js` | move + modify | 自 `src/web/audio.js` 迁入；`createPlayer(sinkId, { onPlaybackError, floorLevel })` 新增 `attachFloor(stream)`、`setFloorLevel(level)`、`holdFloorFull(on)`、`flush()`；其余不变 |
 | `src/extension/session.js` | move + modify | 自 `src/web/session.js` 迁入；`endpoint.url ?? endpoint.path` + `endpoint.headers`；可选 `directionTable` |
-| `src/extension/popup.html`, `sidepanel.html`, `panel.js`, `panel.css` | add | 弹窗与侧栏共用；步骤文案、暂停提示、断开链接 |
+| `src/extension/popup.html`, `sidepanel.html`, `panel.js`, `panel.css` | add | 弹窗与侧栏共用；步骤文案、取消开启、暂停提示 |
 | `src/extension/options.html` + `options.js` | add | 设备角色、授权、衬底音量、本地服务自检、静音感知与限制提示 |
 | `src/extension/icons/icon{16,32,48,128}.png` | add | `tools/gen-icons.mjs` 生成并提交 |
 | `src/server/native-host.mjs` | add | Native Messaging 宿主入口 |
@@ -119,8 +132,8 @@
 
 ```jsonc
 // UI → SW
-{ "type": "li:disconnect", "to": "sw" }              // → { ok }
-{ "type": "li:power", "to": "sw", "on": true }       // 未连接则先建桥再开启（冷启动）；→ { ok } | { ok:false, reason:'busy' }
+{ "type": "li:power", "to": "sw", "on": true }       // 冷启动：建桥 → 宿主 → 会话；→ { ok } | { ok:false, reason:'busy' }
+{ "type": "li:power", "to": "sw", "on": false }      // 进行中 = 关闭并释放一切；开启中 = 取消；关闭中 → busy
 { "type": "li:set-settings", "to": "sw", "hear": "ja", "partnerHears": "en", "floorLevel": 0.25, "deviceOverrides": { … } }
 //   任意子集；normalizeSettings 后写 storage.local；语言变化且 phase=on → li:update-plan；floorLevel 变化且 bridge=connected → li:set-floor
 
@@ -131,12 +144,12 @@
 // SW → 离屏
 { "type": "li:connect", "to": "offscreen", "deviceOverrides": { … }, "floorLevel": 0.25 }
 //   → { ok:true, roles, labels } | { ok:false, error }（离屏已自行收尾）
-{ "type": "li:disconnect", "to": "offscreen" }       // 先撤翻译再撤直通与播放器 → { ok:true }
+{ "type": "li:disconnect", "to": "offscreen" }       // 先撤翻译再撤直通与播放器 → { ok:true }；关闭、取消、失败都经 releaseAll 发它，随后关闭离屏文档
 { "type": "li:start", "to": "offscreen", "plan": { … }, "uplinkPaused": false,
   "server": { "baseUrl", "backend", "mockWsUrl", "launchToken" } }
 //   → { ok:true, directions: { downlink: { status:'running', mode }, uplink: { … } } } | { ok:false, error }（只撤翻译层）
 //   就绪判定在离屏：每个 translate 方向的 session 收到 'open' 且 startCapture 返回后才回复 ok
-{ "type": "li:stop", "to": "offscreen" }             // 只撤翻译层，直通回 1.0 → { ok:true }
+{ "type": "li:stop", "to": "offscreen" }             // 只撤翻译层，直通回 1.0 → { ok:true }（SW 已不再发送，保留为离屏能力）
 { "type": "li:update-plan", "to": "offscreen", "plan": { … }, "server": { … } }   // → { ok:true, restarted: ["downlink"] }
 { "type": "li:set-uplink-paused", "to": "offscreen", "paused": false }             // → { ok:true, restarted: [] | ["uplink"] }
 { "type": "li:set-floor", "to": "offscreen", "level": 0 }                          // → { ok:true }
@@ -163,10 +176,10 @@
 | 时机 | id | title | message（由纯函数生成） |
 | --- | --- | --- | --- |
 | 就绪（`started` 后） | `li-ready` | 同传已就绪 | `readyCopy({ plan, meetingMuted })`：「本地翻译服务已启动，双向连接成功。对方说的会翻成{听}进你的耳机，你说的话会翻成{对方听}送进会议。」原声方向改为「对方的原声会直接进你的耳机」/「你的原声会直接送进会议」；`meetingMuted === true` 时第二句改为「你在会议里已静音，取消静音后你说的话会翻成{对方听}送进会议。」 |
-| 翻译层失败（`failed`） | `li-failed` | 无法开启同传 | `failureCopy({ kind: 'translation', error, bridge })`：`error.message` + （桥已连）「原声仍在直通。」 |
-| 桥失败（`bridgeFailed`） | `li-failed` | 无法连接会议音频 | `failureCopy({ kind: 'bridge', error })`：`error.message` + 「会议现在听不到你，你也听不到会议。」 |
+| 翻译层失败（`failed`） | `li-failed` | 无法开启同传 | `failureCopy({ kind: 'translation', error })`：`error.message` |
+| 桥失败（`bridgeFailed`） | `li-failed` | 无法连接会议音频 | `failureCopy({ kind: 'bridge', error })`：`error.message` |
 
-`type: 'basic'`，`iconUrl: 'icons/icon128.png'`；同 id 覆盖前一条；`stopped`/`disconnected` 不通知。
+`type: 'basic'`，`iconUrl: 'icons/icon128.png'`；同 id 覆盖前一条；关闭（`stopped`）与取消不通知。
 
 ### Native Messaging 宿主协议（stdin/stdout，4 字节小端长度前缀 + UTF-8 JSON）
 
@@ -263,12 +276,12 @@
 | on | `uplinkResumed(s)` | on | `directions.uplink.status = 'running'` |
 | on | `planApplied(s, { directions, languages })` | on | 更新 directions/languages |
 | on / starting / error | `requestStop(s)` | stopping | `startStep = null` |
-| stopping | `stopped(s)` | off | directions 全 stopped、server/languages/since 清空；`bridge` 不变 |
-| 任意 | `failed(s, err)` | error | `startStep = null`、directions 全 stopped、server/languages 清空、`error = err`；`bridge` 不变 |
+| stopping | `stopped(s)` | off | 回到初始（桥一并撤掉，只保留 `meetingMuted`）；关闭与取消共用 |
+| 任意 | `failed(s, err)` | error | 回到初始后置 `phase = error`、`error = err`（桥为 disconnected，只保留 `meetingMuted`） |
 | 任意 | `meetingMute(s, muted)` | 不变 | `meetingMuted = muted`（`true/false/null`）；其它字段不变 |
 | 其它组合 | 任意 | 不变 | 返回同一引用 |
 
-`badgeFor(state)`（按优先级）：`bridge = failed` 或 `phase = error` → `{ text: '!', color: '#f07a68' }`；`bridge = connecting` 或 `phase ∈ { starting, stopping }` → `{ text: '…', color: '#6b7380' }`；`phase = on` 且 `meetingMuted === true` → `{ text: '●', color: '#e6b45a' }`；`phase = on` → `{ text: '●', color: '#4fd6b8' }`；`bridge = connected` → `{ text: '●', color: '#6b7380' }`；否则 `{ text: '' }`。
+`badgeFor(state)`（按优先级）：`bridge = failed` 或 `phase = error` → `{ text: '!', color: '#f07a68' }`；`bridge = connecting` 或 `phase ∈ { starting, stopping }` → `{ text: '…', color: '#6b7380' }`；`phase = on` 且 `meetingMuted === true` → `{ text: '●', color: '#e6b45a' }`；`phase = on` → `{ text: '●', color: '#4fd6b8' }`；否则 `{ text: '' }`（未开启一律无角标）。
 
 `planRecovery({ runtime, hasNativePort, hasOffscreen })`（SW 顶层启动时调用；绝不返回需要占用设备的动作）：
 
@@ -276,16 +289,16 @@
 | --- | --- |
 | `bridge ∈ { connected, connecting }` 且 `!hasOffscreen` | `{ action: 'fail-bridge', error: { category: 'api_error', message: '会议音频桥意外中断，请重新开启。' } }` |
 | `bridge = connected` 且 `phase = on` 且 `!hasNativePort` | `{ action: 'reconnect-host' }` |
-| `bridge = connected` 且 `phase ∈ { starting, stopping }` | `{ action: 'fail-translation', error: { category: 'api_error', message: '上次操作未完成，已重置为关闭。' } }` |
+| `phase ∈ { starting, stopping }`（不论桥走到哪一步） | `{ action: 'fail-translation', error: { category: 'api_error', message: '上次操作未完成，已重置为关闭。' } }` |
 | 其它（含浏览器刚启动的初始态） | `{ action: 'none' }` |
 
-`statusCopy({ bridge, bridgeError, phase, startStep, error, plan, meetingMuted })` 返回 `{ title, body, tone, primary, stepText, note }`；`readyCopy`、`failureCopy` 见通知契约；`stripSecrets(server)` → `{ port, backend }`。
+`statusCopy({ bridge, bridgeError, phase, startStep, error, plan, meetingMuted })` 返回 `{ title, body, tone, primary, action, variant, spinner, lockFields, stepText, note, hint }`：`action ∈ { start, stop, cancel, null }` 决定主按钮发什么（`cancel` 与 `stop` 都发 `li:power {on:false}`），`null` 即不可点；`readyCopy`、`failureCopy` 见通知契约；`stripSecrets(server)` → `{ port, backend }`。
 
 ### Data / Cache / External Services
 
 - 数据源：`chrome.storage.local.settings`、`chrome.storage.session.runtime`、`.env`（宿主进程读取）。无缓存；运行态不持久化。
 - 外部服务：OpenAI realtime translations（协议层不变；每方向一个会话；改目标语言重建会话）；宿主 HTTP 只绑 `127.0.0.1:0`，只在同传开启期间存在。
-- 错误行为：翻译层失败 → `failed` + 撤翻译层（session/capture close、宿主退出、直通回 1.0）+ 失败通知，桥保持；桥失败 → `bridgeFailed` + 撤一切（含宿主）+ 失败通知，离屏文档保留以监听 `devicechange`；暂停期间上行 `closed` → `uplinkSuspended`；不自动重连（`device_missing` 桥失败在 `devicechange` 时重试一次除外）。
+- 错误行为：翻译层失败 → `releaseAll` + `failed` + 失败通知；桥失败 → `releaseAll` + `bridgeFailed` + 失败通知；两者都关闭离屏文档、撤宿主，不保留任何设备占用；暂停期间上行 `closed` → `uplinkSuspended`；绝不自动重连，设备变化不触发任何动作（2026-09-10 变更）。
 - 超时：`li:connect` 10 s；`connectNative` 到 `ready` 10 s；`li:start` 15 s；恢复重建 15 s。
 
 ### Compatibility
@@ -312,21 +325,21 @@ AC 编号从 101 起，避免与现有测试标题沿用的旧编号混淆；新
 
 #### 音频桥与冷启动
 
-- [ ] AC-136: Given 已授权、设备就绪、`runtime.bridge = disconnected`，when `li:power {on:true}`（SW 的第一步向离屏发 `li:connect`），then 10 s 内 `bridge` 经 `connecting` 到 `connected`，离屏文档存在，两方向各建立一条直通路（`getUserMedia` → `MediaStreamSource` → `GainNode` 增益 1.0 → 已 `setSinkId` 的 `destination`），直通约束分别来自 `buildFloorConstraints(id, 'capture')`（三项处理全关）与 `buildFloorConstraints(id, 'mic')`（AEC、NS 开，AGC 关）；建桥完成前未 `connectNative`、未请求 token；UI 层没有只建桥不翻译的入口（`panel.js`、`options.js` 不发送 `li:connect`，静态检查）；手测：开启后再「关闭同传」，耳机听到会议原声、BlackHole 16ch 录到我的原声，端到端延迟 < 50 ms。
+- [ ] AC-136: 【手测里「关闭后原声仍直通」已由 AC-147 取代】Given 已授权、设备就绪、`runtime.bridge = disconnected`，when `li:power {on:true}`（SW 的第一步向离屏发 `li:connect`），then 10 s 内 `bridge` 经 `connecting` 到 `connected`，离屏文档存在，两方向各建立一条直通路（`getUserMedia` → `MediaStreamSource` → `GainNode` 增益 1.0 → 已 `setSinkId` 的 `destination`），直通约束分别来自 `buildFloorConstraints(id, 'capture')`（三项处理全关）与 `buildFloorConstraints(id, 'mic')`（AEC、NS 开，AGC 关）；建桥完成前未 `connectNative`、未请求 token；UI 层没有只建桥不翻译的入口（`panel.js`、`options.js` 不发送 `li:connect`，静态检查）；手测：开启后再「关闭同传」，耳机听到会议原声、BlackHole 16ch 录到我的原声，端到端延迟 < 50 ms。
 - [ ] AC-137: `floorTarget({ translating, holdFull, level })`：`holdFull` → 1；否则 `translating` → `level`；否则 1。`isTranslating({ now, playhead, releaseMs: 700 })` 当且仅当 `now < playhead + 0.7` 为真。`createPlayer`：`enqueue` 时 50 ms 内把直通增益 ramp 到 `floorLevel`；队列播完且经过 700 ms 后 200 ms 内 ramp 回 1.0；`setFloorLevel(0)` 时译文播放期间增益为 0、停顿后仍回 1.0；`holdFloorFull(true)` 后 `enqueue` 不再压低且增益立即回 1.0；静态检查 `audio.js` 用 `linearRampToValueAtTime`（或 `setTargetAtTime`）改增益并从 `/shared/floor.mjs` 导入 `floorTarget`/`isTranslating`。
-- [ ] AC-138: Given `bridge = connected`，when 开启同传因宿主不可用 / 凭证失败 / WS 失败 / 网络断开而 `failed`，then `runtime.bridge === 'connected'`、`phase === 'error'`，两方向 player 与直通 stream 引用不变、增益回到 1.0，离屏文档仍存在，native 端口已断开；弹窗标题「无法开启同传」且说明含「原声仍在直通」；已发出 id `li-failed` 的通知，正文等于 `failureCopy({ kind: 'translation', error, bridge: 'connected' })`；手测会议音频不中断。
+- [ ] AC-138: 【已由 AC-148 取代：翻译层失败现在连桥一起释放，正文不再含「原声仍在直通」】Given `bridge = connected`，when 开启同传因宿主不可用 / 凭证失败 / WS 失败 / 网络断开而 `failed`，then `runtime.bridge === 'connected'`、`phase === 'error'`，两方向 player 与直通 stream 引用不变、增益回到 1.0，离屏文档仍存在，native 端口已断开；弹窗标题「无法开启同传」且说明含「原声仍在直通」；已发出 id `li-failed` 的通知，正文等于 `failureCopy({ kind: 'translation', error, bridge: 'connected' })`；手测会议音频不中断。
 - [ ] AC-139: 不自动连接：`background.js` 的 `onInstalled`、`onStartup` 处理器与顶层代码不调用 `chrome.offscreen.createDocument`、`connectNative`，也不向离屏发 `li:connect`/`li:start`（静态检查）；`planRecovery` 对初始 runtime 返回 `{ action: 'none' }`，且任何返回值的 `action` 不属于 `{ connect, start }`；手测：重启 Chrome 后 macOS 无橙色麦克风指示、`getContexts` 无离屏文档、badge 空、弹窗显示「同传已关闭」与「未连接会议音频」。
-- [ ] AC-140: Given `bridge = connected`（`phase` 任意），when `li:disconnect`，then 若 `phase = on` 先撤翻译层（宿主退出），随后两方向 `player.stop()`、直通 track 全部 `readyState === 'ended'`、离屏文档关闭，`runtime` 回到初始（`meetingMuted` 保留），badge 为空；弹窗显示「未连接会议音频」及「会议现在听不到你，你也听不到会议」。
-- [ ] AC-141: Given `phase = on`，when 离屏上报 `bridge-lost`，then SW 执行 `bridgeFailed`：`bridge === 'failed'`、`phase === 'error'`、`bridgeError` 与 `error` 同一 message、宿主已退出、离屏文档保留、已发出 `li-failed` 通知（正文为 `failureCopy({ kind: 'bridge', error })`）；Given `bridge = failed` 且 `bridgeError.category === 'device_missing'`，when 离屏上报 `devicechange`，then SW 自动重试一次 `li:connect`（同一次 `devicechange` 至多一次），成功则 `connected`，仍失败则保持 `failed` 且不循环。
+- [ ] AC-140: 【已由 AC-147、AC-149 取代：不再有「断开会议音频」入口】Given `bridge = connected`（`phase` 任意），when `li:disconnect`，then 若 `phase = on` 先撤翻译层（宿主退出），随后两方向 `player.stop()`、直通 track 全部 `readyState === 'ended'`、离屏文档关闭，`runtime` 回到初始（`meetingMuted` 保留），badge 为空；弹窗显示「未连接会议音频」及「会议现在听不到你，你也听不到会议」。
+- [ ] AC-141: 【前半仍有效但离屏文档现在一并关闭；后半 devicechange 自动重试已由 AC-148 取代】Given `phase = on`，when 离屏上报 `bridge-lost`，then SW 执行 `bridgeFailed`：`bridge === 'failed'`、`phase === 'error'`、`bridgeError` 与 `error` 同一 message、宿主已退出、离屏文档保留、已发出 `li-failed` 通知（正文为 `failureCopy({ kind: 'bridge', error })`）；Given `bridge = failed` 且 `bridgeError.category === 'device_missing'`，when 离屏上报 `devicechange`，then SW 自动重试一次 `li:connect`（同一次 `devicechange` 至多一次），成功则 `connected`，仍失败则保持 `failed` 且不循环。
 - [ ] AC-142: 冷启动步骤：Given `bridge = disconnected`、`phase = off`，when `li:power {on:true}`，then `runtime` 依次出现 `{ phase: 'starting', startStep: 'bridge' }` → `{ bridge: 'connected', startStep: 'host' }` → （宿主 `ready` 后）`{ startStep: 'translation' }` → `{ phase: 'on', startStep: null }`；Given `bridge = connected`，同一消息从 `startStep: 'host'` 开始；每个阶段弹窗按钮禁用并转圈，按钮下方 `stepText` 分别为「正在连接会议音频…」「正在启动本地翻译服务…」「正在连接翻译服务…」，badge 为 `…`；`startStep` 的每次变化都由 `runtime-state.mjs` 的转换产生（`background.js` 不含 `startStep =` 赋值）。
 - [ ] AC-143: 就绪判定与通知：离屏对 `li:start` 只在每个 `mode = translate` 方向的会话收到 `open` 事件且 `startCapture` 已返回后才回复 `{ ok: true }`；SW 随即 `started` 并发出 id `li-ready` 的通知，title「同传已就绪」，message 等于 `readyCopy({ plan, meetingMuted })`：两方向 translate（zh / en）且 `meetingMuted !== true` → 「本地翻译服务已启动，双向连接成功。对方说的会翻成中文进你的耳机，你说的话会翻成 English 送进会议。」；`meetingMuted === true` → 第二句为「你在会议里已静音，取消静音后你说的话会翻成 English 送进会议。」；uplink passthrough → 「你的原声会直接送进会议」；downlink passthrough → 「对方的原声会直接进你的耳机」；任一方向在 `open` 前 `error`/`closed` → 不发 `li-ready`，按 AC-105 失败并发 `li-failed`；`stopped`、`disconnected` 不发通知。
 
 #### 主流程
 
 - [ ] AC-101: Given `bridge = connected`、`phase = off`，when `li:power {on:true}`，then 5 s 内 `phase` 经 `starting` 到 `on`，两方向 `directions.*.status === 'running'`、`server.port` 等于宿主 `ready` 帧的端口，弹窗标题「同传进行中」，badge 绿 `●`（`meetingMuted === true` 时琥珀 `●` 且说明「会议已静音 · 暂停翻译你的话」）；Given `bridge = disconnected`，同一消息先完成 AC-136 再继续（AC-142 的步骤）。
-- [ ] AC-102: Given `phase = on`，when `li:power {on:false}`，then `phase` 经 `stopping` 到 `off`，两方向 session/capture 已 close/stop，player 与直通 stream 引用不变且增益回 1.0，native 端口已断开且宿主 2 s 内退出（`pgrep -f native-host.mjs` 无结果），离屏文档仍存在，`bridge === 'connected'`，badge 灰 `●`，弹窗标题「同传已关闭」且说明含「原声直通中」；手测耳机原声与 BlackHole 16ch 原声均不中断。
+- [ ] AC-102: 【已由 AC-147 取代：关闭同传现在连桥与离屏文档一起释放】Given `phase = on`，when `li:power {on:false}`，then `phase` 经 `stopping` 到 `off`，两方向 session/capture 已 close/stop，player 与直通 stream 引用不变且增益回 1.0，native 端口已断开且宿主 2 s 内退出（`pgrep -f native-host.mjs` 无结果），离屏文档仍存在，`bridge === 'connected'`，badge 灰 `●`，弹窗标题「同传已关闭」且说明含「原声直通中」；手测耳机原声与 BlackHole 16ch 原声均不中断。
 - [ ] AC-103: Given `phase = on`，when 关闭弹窗再重新打开，then 弹窗直接从 `storage.session.runtime` 渲染为「同传进行中」（含暂停态），期间 mock 提示音与直通原声都不中断。
-- [ ] AC-104: Given `bridge = connecting` 或 `phase ∈ { starting, stopping }`，when 收到 `li:power`，then 响应 `{ ok: false, reason: 'busy' }` 且 runtime 不变；弹窗电源按钮禁用并转圈，显示「正在开启…」/「正在关闭…」。
+- [ ] AC-104: 【「开启中收到 li:power {on:false} 为 busy」已由 AC-146 取代；其余仍有效】Given `bridge = connecting` 或 `phase ∈ { starting, stopping }`，when 收到 `li:power`，then 响应 `{ ok: false, reason: 'busy' }` 且 runtime 不变；弹窗电源按钮禁用并转圈，显示「正在开启…」/「正在关闭…」。
 - [ ] AC-105: Given 任一翻译启动步骤失败（宿主连接、凭证、WS 建连、超时），then `phase = error`、`startStep = null` 且 `error.category/message` 为对应分类，已创建的 session/capture 全部 close/stop，native 端口已断开，桥与直通保持（AC-138），已发出 `li-failed` 通知；紧接着 `li:power {on:true}` 能从 error 直接重试。
 - [ ] AC-106: 面板渲染只依赖 `storage.local.settings` 与 `storage.session.runtime`，通过 `chrome.storage.onChanged` 刷新；`panel.js` 源码不含 `getUserMedia`、`enumerateDevices`、`connectNative`、`chrome.offscreen`、`chrome.notifications`，不含对 `meetingMuted`/`bridge`/`startStep` 的判定表达式（文案、按钮、步骤、可见性全部来自 `statusCopy` 返回值）。
 
@@ -376,11 +389,19 @@ AC 编号从 101 起，避免与现有测试标题沿用的旧编号混淆；新
 
 #### UI 表面
 
-- [ ] AC-126: `popup.html` 与 `sidepanel.html` 都只加载 `panel.js`（`type="module"`）与 `panel.css`，无内联 `<script>`；`panel.js` 或其模板包含字符串：会议同传、Live Interpreter、未连接会议音频、无法连接会议音频、同传已关闭、原声直通中、同传进行中、无法开启同传、原声仍在直通、会议已静音、暂停翻译你的话、未感知到会议静音、正在恢复翻译…、正在连接会议音频…、正在启动本地翻译服务…、正在连接翻译服务…、你想听的语言、对方听的语言、开启同传、关闭同传、断开会议音频、正在开启…、正在关闭…、脚注全文；不含「你说的语言」、「只连接原声」、「重试」、「静音」按钮、「恢复翻译」按钮；两个下拉各渲染 13 项加「原声（不翻译）」共 14 项。
-- [ ] AC-127: `statusCopy` 纯函数：`bridge = disconnected` → title「同传已关闭」、body 含「未连接会议音频」、primary「开启同传」、无 secondary；`bridge = failed` → title「无法连接会议音频」、tone `danger`、body 为 `bridgeError.message` + 「会议现在听不到你，你也听不到会议。」、primary「开启同传」；`connected` + `phase = off` → title「同传已关闭」、body 含「原声直通中」、primary「开启同传」；`starting` → primary「正在开启…」且 `stepText` 按 `startStep` 为三段文案之一；`on` 未暂停（zh / en，两方向 translate）→ body「对方说的会翻成中文进你的耳机，你说的话会翻成 English 送进会议。翻译播放时原声会压低。」；downlink passthrough → 「对方的原声会直接进你的耳机」；uplink passthrough → 「你的原声会直接送进会议」；`on` 且 `meetingMuted === true` → body「会议已静音 · 暂停翻译你的话。对方说的仍会翻成中文进你的耳机。」、tone `warning`；`on` 且 `meetingMuted === null` → `note`「未感知到会议静音（仅支持 Google Meet）」；`phase = error`（桥正常）→ title「无法开启同传」、tone `danger`、body 为 `error.message` + 「原声仍在直通。」；`stopping` → primary「正在关闭…」。
+- [ ] AC-126: 【文案清单已由 AC-149 更新】`popup.html` 与 `sidepanel.html` 都只加载 `panel.js`（`type="module"`）与 `panel.css`，无内联 `<script>`；`panel.js` 或其模板包含字符串：会议同传、Live Interpreter、未连接会议音频、无法连接会议音频、同传已关闭、原声直通中、同传进行中、无法开启同传、原声仍在直通、会议已静音、暂停翻译你的话、未感知到会议静音、正在恢复翻译…、正在连接会议音频…、正在启动本地翻译服务…、正在连接翻译服务…、你想听的语言、对方听的语言、开启同传、关闭同传、断开会议音频、正在开启…、正在关闭…、脚注全文；不含「你说的语言」、「只连接原声」、「重试」、「静音」按钮、「恢复翻译」按钮；两个下拉各渲染 13 项加「原声（不翻译）」共 14 项。
+- [ ] AC-127: 【已关闭 / 桥失败 / 翻译失败 / 开启中的文案已由 AC-149 更新】`statusCopy` 纯函数：`bridge = disconnected` → title「同传已关闭」、body 含「未连接会议音频」、primary「开启同传」、无 secondary；`bridge = failed` → title「无法连接会议音频」、tone `danger`、body 为 `bridgeError.message` + 「会议现在听不到你，你也听不到会议。」、primary「开启同传」；`connected` + `phase = off` → title「同传已关闭」、body 含「原声直通中」、primary「开启同传」；`starting` → primary「正在开启…」且 `stepText` 按 `startStep` 为三段文案之一；`on` 未暂停（zh / en，两方向 translate）→ body「对方说的会翻成中文进你的耳机，你说的话会翻成 English 送进会议。翻译播放时原声会压低。」；downlink passthrough → 「对方的原声会直接进你的耳机」；uplink passthrough → 「你的原声会直接送进会议」；`on` 且 `meetingMuted === true` → body「会议已静音 · 暂停翻译你的话。对方说的仍会翻成中文进你的耳机。」、tone `warning`；`on` 且 `meetingMuted === null` → `note`「未感知到会议静音（仅支持 Google Meet）」；`phase = error`（桥正常）→ title「无法开启同传」、tone `danger`、body 为 `error.message` + 「原声仍在直通。」；`stopping` → primary「正在关闭…」。
 - [ ] AC-128: 弹窗 380×600（`body[data-surface=popup]` 固定尺寸），侧栏 `body[data-surface=side]` 宽 100%、最小高 100vh；下拉菜单最大高度约 280 px 内滚动；深色默认，`prefers-color-scheme: light` 用浅色 token；错误态 danger 色；进行中脉冲绿点；开启中按钮内转圈动画与步骤文案；暂停态琥珀说明；「断开会议音频」为底部低调链接。（截图手测）
 - [ ] AC-129: 选项页加载即 `enumerateAudioDevices()`（触发授权提示）；四个 `<select>` 首项「（默认分配）」并按 kind 过滤；改动即写 `settings.deviceOverrides` 并实时显示 `preflight` 结论；「同传时原声衬底」三选一写 `settings.floorLevel`；「检测本地服务」按钮 `connectNative` 后显示 `ready` 的 backend/port 或 `classifyNativeError` 的原因 + 安装命令，并立即断开端口；页面含静音感知说明（仅 Google Meet）、同语言限制与「建议耳机」提示；不含自动连接开关。
 - [ ] AC-145: 通知发送纪律：`background.js` 只在 `started`、`failed`、`bridgeFailed` 三处调用 `chrome.notifications.create`，id 分别为 `li-ready`、`li-failed`、`li-failed`，message 只来自 `readyCopy`/`failureCopy`（静态检查）；手测：弹窗关闭时开启同传，就绪后 macOS 出现「同传已就绪」通知且正文与面板说明一致；卸载宿主后开启，出现「无法开启同传」通知。
+
+#### 关闭即释放与开启可取消（2026-09-10 变更）
+
+- [ ] AC-146: Given `phase = starting`，不论卡在连接会议音频、启动本地翻译服务还是连接翻译服务，when `li:power {on:false}`，then SW 不等任何超时立即回复 `{ ok: true }`，`runtime` 经 `stopping` 回到 `createInitialRuntime()`；离屏收到 `li:disconnect` 且文档已关闭；已发出但还没 `ready` 的宿主端口也被断开并收到 `{ type: 'shutdown' }`；不发任何通知；之后迟到的 `li:connect` 应答、`ready` 帧或 `li:start` 应答都不改变状态、不发「同传已就绪」；紧接着 `li:power {on:true}` 能正常开启。面板在开启中显示可点的「取消开启」（outline 样式、带转圈），步骤文案照常，两个下拉锁定；`statusCopy` 在 `phase = starting` 时返回 `action: 'cancel'`，在 `phase = stopping` 时返回 `action: null`。
+- [ ] AC-147: Given `phase = on`，when `li:power {on:false}`，then `runtime` 经 `stopping` 回到初始（`bridge = disconnected`、`phase = off`，只保留 `meetingMuted`）；宿主端口断开且收到 shutdown；离屏收到 `li:disconnect` 后文档关闭；角标为空；不发通知；关文档必然掉的 keepalive 端口不被误判成桥丢失。手测：点「关闭同传」后 2 s 内 macOS 橙色麦克风指示消失，`pgrep -f native-host.mjs` 为空。
+- [ ] AC-148: 任一翻译层失败（宿主不可用、凭证、WS、网络、改语言重建、SW 恢复时发现半启动）后 `runtime` 为 `phase = error`、`bridge = disconnected`；任一桥失败（预检、授权、`bridge-lost`、离屏文档丢失）后为 `bridge = failed`、`phase = error`；两者都已撤宿主、发 `li:disconnect` 并关闭离屏文档，各发一条 `li-failed` 通知，正文等于 `error.message`；之后的 `devicechange` 不触发任何离屏动作，迟到的 `bridge-lost` 不再发通知。
+- [ ] AC-149: 面板与 `statusCopy` 不再出现「断开会议音频」「原声直通中」「原声仍在直通」「正在开启…」「未连接会议音频」；`statusCopy` 不再返回 `secondary`；已关闭时 body 为「开启后，对方说的话会翻成你要听的语言进你的耳机，你说的话会翻译后送进会议。关闭时插件不占用麦克风，也不转送会议声音。」；桥已连但未开启的状态（不应出现）按已关闭渲染；`badgeFor` 在未开启时一律返回 `{ text: '' }`；两个 HTML 模板里没有 `id="disconnect"`。
+- [ ] AC-150: `background.js` 的 UI 处理器只剩 `li:power` 与 `li:set-settings`；`stop()`、`cancelStart()`、`failTranslation()`、`failBridge()` 都经 `releaseAll()`，后者撤宿主、发 `li:disconnect`、关闭离屏文档，并在关文档窗口内落终态；`start()` 与建桥里的每个 `withTimeout` 都带取消令牌，副作用前都有 `checkpoint(run)`；被取消的开启不走失败流程；没有 `devicechange` 自动重连。
 
 ## Implementation Notes
 
@@ -411,17 +432,18 @@ AC 编号从 101 起，避免与现有测试标题沿用的旧编号混淆；新
 | Case | Expected Behavior |
 | --- | --- |
 | 浏览器启动 | 无任何动作：不占麦克风、无离屏文档、无宿主 |
-| 开启时耳机未接 / 未授权 | 第一步 `bridge = failed`（device_missing / permission_denied）+ 通知；弹窗「开启同传」/「音频设置」/「去授权麦克风」；插上耳机 `devicechange` 自动重试一次 |
-| 宿主 manifest 未安装 / ID 不符 | 第二步失败：翻译层 `host_unavailable` + 通知，桥保持（原声直通） |
+| 开启时耳机未接 / 未授权 | 第一步 `bridge = failed`（device_missing / permission_denied）+ 通知，撤掉一切；弹窗「开启同传」/「音频设置」/「去授权麦克风」；插上耳机后需要再点一次开启 |
+| 宿主 manifest 未安装 / ID 不符 | 第二步失败：翻译层 `host_unavailable` + 通知，撤掉一切 |
 | wrapper 的 node 路径失效 | 宿主启动即退出 → `host_unavailable`，提示重跑安装并看 `host.log` |
-| `.env` 缺 key 且 real | 宿主 `ready`；第三步 token 500 `config_missing` → 翻译层 failed + 通知，桥保持 |
+| `.env` 缺 key 且 real | 宿主 `ready`；第三步 token 500 `config_missing` → 翻译层 failed + 通知，撤掉一切 |
 | 一方向 `open` 成功、另一方向失败 | 不发就绪通知；整体翻译层 failed，已开的会话关闭 |
-| 翻译中 WS 断开 | 翻译层 failed + 通知，直通回 1.0，会议不受影响 |
+| 翻译中 WS 断开 | 翻译层 failed + 通知，撤掉一切（插件不再转送声音） |
+| 开启途中用户点「取消开启」 | 作废在途的建桥、宿主与会话，回到初始，不通知；迟到的应答一律不算数 |
 | 开启时 Meet 已静音 | 上行会话照建但立即门控；就绪通知写明已静音 |
 | Meet 静音期间上行会话被对端关闭 | `uplink-suspended`，取消静音时重建 |
 | Meet 静音期间收到上行译文帧 | 丢弃 |
 | Meet 静音时切「对方听的语言」 | 上行按新计划重建，仍暂停 |
-| 取消静音时重建失败 | 翻译层 failed + 通知，桥保持 |
+| 取消静音时重建失败 | 翻译层 failed + 通知，撤掉一切 |
 | Meet 页面刷新 / 进入会议前的等候页 | 脚本重新加载后上报当前态；找不到按钮上报 null → 不暂停 |
 | 多个 Meet 标签 | 取最近上报；关闭的标签记录移除 |
 | Meet 改版找不到按钮 | 上报 null → 不暂停；弹窗显示「未感知到会议静音」 |
@@ -432,7 +454,7 @@ AC 编号从 101 起，避免与现有测试标题沿用的旧编号混淆；新
 | `floorLevel = 0` | 译文播放时原声 0；停顿 0.7 s 后仍恢复 1.0 |
 | 两方向都选「原声」 | 开启同传不建任何会话、不请求 token，但宿主仍被拉起（开/关语义一致） |
 | 用户用扬声器外放 | 真麦克风直通开 AEC/NS；仍建议耳机 |
-| 直通 track 被系统结束 | `bridge-lost` → 桥失败 + 翻译层失败 + 通知；`devicechange` 重试 |
+| 直通 track 被系统结束 | `bridge-lost` → 桥失败 + 通知，撤掉一切；插回设备不自动重连 |
 | 离屏文档被 Chrome 关闭 | keepalive 断开 → `fail-bridge`（宿主退出）+ 通知 |
 | SW 被终止后再唤醒 | `planRecovery`：桥在且翻译 on → 重连宿主并 `li:server-changed`；离屏不在 → fail-bridge；中间态 → fail-translation；其它 none |
 | 用户在开启中连点 | busy，UI 已禁用 |
@@ -455,11 +477,12 @@ AC 编号从 101 起，避免与现有测试标题沿用的旧编号混淆；新
   5. 在 Meet 点静音 → 0.5 s 内面板「会议已静音 · 暂停翻译你的话」、角标琥珀；QuickTime 录 BlackHole 16ch：提示音消失、我的原声连续；耳机对方提示音继续；取消静音 → 提示音回来（AC-131, AC-132）。
   6. 关闭弹窗、等 60 s、重开 → 仍进行中；`pgrep -f native-host.mjs` 有一条（AC-103）。
   7. 改「你想听的语言」为 日本語 → 仅下行重启；改「对方听的语言」为「原声」→ 16ch 只录到原声；改回（AC-109, AC-110）。
-  8. 「关闭同传」→ 2 s 内 `pgrep` 为空、角标灰点、耳机与 16ch 原声仍直通（AC-102）；再「开启同传」→ 只转后两步（AC-142）。
-  9. 删除宿主 manifest 后「开启同传」→ 面板「无法开启同传」+ 安装命令 + 「原声仍在直通」，通知同文，耳机原声未断（AC-105, AC-138）；重装后可开启。
-  10. 选项页把 monitor 选成 BlackHole → 「断开会议音频」→ 「开启同传」→ 第一步失败「无法连接会议音频」+ 预检原文 + 通知（AC-141 失败态）；改回 → 再「开启同传」成功。
-  11. 拔耳机 → 桥失败 + 通知；插回 → 自动恢复（AC-141）。
-  12. 「断开会议音频」→ 角标消失、橙点消失、弹窗「未连接会议音频」；再「开启同传」→「关闭同传」→ 灰点、原声直通、无宿主（AC-136, AC-140）。
+  8. 「关闭同传」→ 2 s 内 `pgrep` 为空、角标消失、macOS 橙色麦克风指示消失（AC-147）；再「开启同传」→ 三步冷启动重新走一遍（AC-142）。
+  8a. 「开启同传」后在三段步骤任一处点「取消开启」→ 立即回到「同传已关闭」，无通知，橙色指示消失（AC-146）。
+  9. 删除宿主 manifest 后「开启同传」→ 面板「无法开启同传」+ 安装命令，通知同文，橙色指示消失（AC-105, AC-148）；重装后可开启。
+  10. 选项页把 monitor 选成 BlackHole →「开启同传」→ 第一步失败「无法连接会议音频」+ 预检原文 + 通知（AC-148）；改回后再开启成功。
+  11. 同传进行中拔耳机 → 桥失败 + 通知，撤掉一切；插回后需再点「开启同传」（AC-148）。
+  12. （已取消：不再有「断开会议音频」入口，见 AC-149。）
   13. 在 Zoom 网页会议中开启 → 面板「未感知到会议静音（仅支持 Google Meet）」，Zoom 静音不影响翻译（AC-132）。
   14. 「停靠到侧栏」→ 内容一致、可开关（AC-128）。
 - 真实后端手测：`.env` 设 `TRANSLATE_BACKEND=real` 后重复 4～8：耳机听到中文译文叠在压低的英语原声上；对麦克风说中文，16ch 录到英语译文叠在压低的中文原声上；Meet 静音后只剩原声；说一句英语确认原声 100% 无译文。`npm run e2e:real` 仍可独立通过。

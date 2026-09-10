@@ -1,12 +1,4 @@
-import {
-  statusCopy,
-  HEADER_TITLE,
-  HEADER_SUBTITLE,
-  FOOTNOTE,
-  FIELD_LABELS,
-  PRIMARY_STOP,
-  createInitialRuntime,
-} from '/shared/runtime-state.mjs'
+import { statusCopy, HEADER_TITLE, HEADER_SUBTITLE, FOOTNOTE, FIELD_LABELS, createInitialRuntime } from '/shared/runtime-state.mjs'
 import { TARGET_CHOICES } from '/shared/languages.mjs'
 import { DEFAULT_SETTINGS, normalizeSettings, buildDirections } from '/shared/direction-plan.mjs'
 
@@ -24,7 +16,6 @@ const view = {
   power: el('power'),
   powerLabel: el('power-label'),
   step: el('step'),
-  disconnect: el('disconnect'),
   hear: el('hear'),
   partnerHears: el('partnerHears'),
 }
@@ -51,8 +42,6 @@ function fillOptions(select) {
 
 function render() {
   copy = statusCopy({ ...runtime, plan: buildDirections(runtime.languages ?? settings) })
-  // tone = progress 即「正在开启/关闭」：按钮禁用并转圈，下拉锁住
-  const busy = copy.tone === 'progress'
 
   view.status.dataset.tone = copy.tone
   view.title.textContent = copy.title
@@ -62,19 +51,17 @@ function render() {
   view.hint.textContent = copy.hint?.label ?? ''
   view.hint.hidden = copy.hint === null
 
+  // 主按钮的文案、可点与否、转圈、样式全部来自 statusCopy：开启中它是「取消开启」
   view.powerLabel.textContent = copy.primary
-  view.power.disabled = busy
-  view.power.dataset.busy = String(busy)
-  view.power.dataset.variant = copy.primary === PRIMARY_STOP ? 'outline' : 'solid'
+  view.power.disabled = copy.action === null
+  view.power.dataset.busy = String(copy.spinner)
+  view.power.dataset.variant = copy.variant
   view.step.textContent = copy.stepText ?? ''
-
-  view.disconnect.textContent = copy.secondary ?? ''
-  view.disconnect.hidden = copy.secondary === null
 
   view.hear.value = settings.hear
   view.partnerHears.value = settings.partnerHears
-  view.hear.disabled = busy
-  view.partnerHears.disabled = busy
+  view.hear.disabled = copy.lockFields
+  view.partnerHears.disabled = copy.lockFields
 }
 
 async function load() {
@@ -92,11 +79,10 @@ function send(message) {
 }
 
 view.power.addEventListener('click', () => {
-  // 开还是关由 statusCopy 给出的主按钮决定，这里只搬运
-  send({ type: 'li:power', on: copy.primary !== PRIMARY_STOP })
+  // 开、关、取消由 statusCopy 给出的 action 决定，这里只搬运（取消与关闭都是 on:false）
+  if (copy.action === null) return
+  send({ type: 'li:power', on: copy.action === 'start' })
 })
-
-view.disconnect.addEventListener('click', () => send({ type: 'li:disconnect' }))
 
 view.hint.addEventListener('click', () => chrome.runtime.openOptionsPage())
 el('settings').addEventListener('click', () => chrome.runtime.openOptionsPage())

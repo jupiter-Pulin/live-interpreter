@@ -20,18 +20,18 @@
     },
     {
       "id": "AC-102",
-      "status": "pass",
+      "status": "deferred",
       "proof": [
         {
           "type": "test",
-          "ref": "`AC-102 关闭同传…`"
+          "ref": "见 AC-147"
         }
       ],
       "files": [
         "background.js",
         "offscreen.js"
       ],
-      "notes": "automated-pass（音频连续性 manual-pending）；自动化覆盖 phase→off、bridge 保持 connected、`li:stop`、宿主端口断开并收到 `shutdown`、离屏文档保留、灰点、不通知；`pgrep` 与耳机/16ch 不断声留手测 8"
+      "notes": "已由 AC-147 取代（2026-09-10 实机反馈）：关闭同传现在连桥与离屏文档一起释放，关闭后不占用麦克风。原断言按新设计不再成立，对应用例已改写到 AC-147。"
     },
     {
       "id": "AC-103",
@@ -53,7 +53,7 @@
       "proof": [
         {
           "type": "test",
-          "ref": "`AC-104 过渡态收到 li:power 一律 busy…`"
+          "ref": "`AC-104 过渡态：开启中再点开启、关闭中再点任何按钮都是 busy，且 runtime 不变`"
         }
       ],
       "files": [
@@ -61,7 +61,7 @@
         "panel.js",
         "panel.css"
       ],
-      "notes": "automated-pass；三种过渡态都回 `{ok:false, reason:'busy'}` 且 runtime 快照不变；按钮禁用与转圈由 `tone==='progress'` 驱动（AC-128 已静态检查动画）"
+      "notes": "automated-pass；「开启中收到 li:power {on:false} 为 busy」已由 AC-146（取消）取代，其余 busy 语义仍钉住"
     },
     {
       "id": "AC-105",
@@ -311,14 +311,18 @@
       "proof": [
         {
           "type": "test",
-          "ref": "`AC-121 badgeFor…`（九种状态）、`AC-121 每次写 runtime 都刷角标`"
+          "ref": "`AC-121/AC-147 badgeFor：失败 > 过渡 > 静音 > 同传 > 未开启`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-121 每次写 runtime 都同步刷新角标`"
         }
       ],
       "files": [
         "runtime-state.mjs",
         "background.js"
       ],
-      "notes": "automated-pass；断言 `storage.session.set` 与 `setBadgeText` 各只有一处（都在 `dispatch` 里）"
+      "notes": "automated-pass；「桥已连未翻译显示灰点」已随 AC-149 取消，未开启一律无角标"
     },
     {
       "id": "AC-122",
@@ -385,7 +389,19 @@
       "proof": [
         {
           "type": "test",
-          "ref": "`AC-126 弹窗与侧栏只加载…`、`AC-126 面板文案齐备…`、`AC-126 面板不含被否决的入口…`、`AC-126/AC-135 两个下拉各 14 项…`"
+          "ref": "`AC-126 弹窗与侧栏只加载…`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-126 面板文案齐备…`（清单已按 AC-149 更新）"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-126/AC-149 面板不含被否决的入口…`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-126/AC-135 两个下拉各 14 项…`"
         }
       ],
       "files": [
@@ -401,13 +417,21 @@
       "proof": [
         {
           "type": "test",
-          "ref": "`AC-127 statusCopy：未连接 / 桥失败 / 已连未翻译`、`…开启中三段步骤文案与关闭中`、`…进行中 / 已静音 / 静音未知 / 恢复中 / 翻译失败`"
+          "ref": "`AC-127/AC-149 statusCopy：已关闭 / 桥失败；没有「断开」入口`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-127/AC-142/AC-146 statusCopy：开启中三段步骤文案 + 可点的「取消开启」；关闭中不可点`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-127 statusCopy：进行中 / 已静音 / 静音未知 / 恢复中 / 翻译失败`"
         }
       ],
       "files": [
         "runtime-state.mjs"
       ],
-      "notes": "automated-pass；进行中与静音两条正文按 AC 原文逐字比对"
+      "notes": "automated-pass；已关闭 / 桥失败 / 翻译失败 / 开启中的文案按 AC-149 更新"
     },
     {
       "id": "AC-128",
@@ -596,7 +620,7 @@
         "panel.js",
         "options.js"
       ],
-      "notes": "automated-pass（实机 manual-pending）；自动化覆盖两种约束、离屏只有一处 `getUserMedia`、UI 无 `li:connect`、建桥完成前未 `connectNative`；「直通延迟 < 50 ms」「耳机听到原声」留手测 1/12 与上游验证项；Review round 1 补离屏侧运行时证明：两方向各一条 `MediaStreamSource → floorGain(1.0) → 已 setSinkId 的 destination`、约束分别来自 `buildFloorConstraints(id,\"capture\"/\"mic\")`、建桥阶段不起采集、`li:connect` 幂等（major 3）、createPlayer 失败时释放已获取的 stream（minor 7）。直通延迟与听感仍 manual-pending。Review round 2 修了 P2：重叠的 `li:connect`（第一次卡在没人应答的授权弹窗 → SW 超时 `failBridge` 放弃它 → 用户再点开启并建成第二套桥 → 第一次的 `getUserMedia` 才返回）原先会用自己的 `dirs` 无条件覆盖 `bridge.dirs`，两套桥同时活且被覆盖那套的 2 个 AudioContext 与 2 条直通 track 连 `li:disconnect` 都够不到；现在 `connectBridge` 在头部 `disconnectBridge()`（它自身会自增 epoch）之后取快照，入册前比对，不一致就走既有逆序收尾并以取消错误返回。新增用例用可控的 `getUserMedia` 复现该次序。直通延迟与听感仍 manual-pending。"
+      "notes": "automated-pass（实机 manual-pending）；自动化覆盖两种约束、离屏只有一处 `getUserMedia`、UI 无 `li:connect`、建桥完成前未 `connectNative`；「直通延迟 < 50 ms」「耳机听到原声」留手测 1/12 与上游验证项；Review round 1 补离屏侧运行时证明：两方向各一条 `MediaStreamSource → floorGain(1.0) → 已 setSinkId 的 destination`、约束分别来自 `buildFloorConstraints(id,\"capture\"/\"mic\")`、建桥阶段不起采集、`li:connect` 幂等（major 3）、createPlayer 失败时释放已获取的 stream（minor 7）。直通延迟与听感仍 manual-pending。Review round 2 修了 P2：重叠的 `li:connect`（第一次卡在没人应答的授权弹窗 → SW 超时 `failBridge` 放弃它 → 用户再点开启并建成第二套桥 → 第一次的 `getUserMedia` 才返回）原先会用自己的 `dirs` 无条件覆盖 `bridge.dirs`，两套桥同时活且被覆盖那套的 2 个 AudioContext 与 2 条直通 track 连 `li:disconnect` 都够不到；现在 `connectBridge` 在头部 `disconnectBridge()`（它自身会自增 epoch）之后取快照，入册前比对，不一致就走既有逆序收尾并以取消错误返回。新增用例用可控的 `getUserMedia` 复现该次序。直通延迟与听感仍 manual-pending。；2026-09-10：手测里「关闭后原声仍直通」已由 AC-147 取代"
     },
     {
       "id": "AC-137",
@@ -619,18 +643,18 @@
     },
     {
       "id": "AC-138",
-      "status": "pass",
+      "status": "deferred",
       "proof": [
         {
           "type": "test",
-          "ref": "`AC-105/AC-138 宿主不可用…`、`AC-120/AC-138 桥失败时…`、`AC-138/AC-141 failureCopy…`"
+          "ref": "见 AC-148"
         }
       ],
       "files": [
         "background.js",
         "runtime-state.mjs"
       ],
-      "notes": "automated-pass（音频连续性 manual-pending）；自动化覆盖 bridge 保持 connected、离屏文档仍在、native 端口已断、通知正文等于 `failureCopy(...)`；「player 与直通 stream 引用不变、增益回 1.0」留手测 9"
+      "notes": "已由 AC-148 取代（2026-09-10 实机反馈）：翻译层失败现在连桥一起释放，正文不再含「原声仍在直通」。原断言按新设计不再成立，对应用例已改写到 AC-148。"
     },
     {
       "id": "AC-139",
@@ -649,30 +673,18 @@
     },
     {
       "id": "AC-140",
-      "status": "pass",
+      "status": "deferred",
       "proof": [
         {
           "type": "test",
-          "ref": "`AC-140 断开会议音频：先撤翻译层再撤桥，runtime 回初始，角标清空`"
-        },
-        {
-          "type": "test",
-          "ref": "`AC-140 关离屏文档掉 keepalive 端口不得被误判成桥丢失：全程零通知`"
-        },
-        {
-          "type": "test",
-          "ref": "`AC-140 li:disconnect：撤翻译层后停全部播放器与直通 track`（tests/integration/offscreen-flow.test.mjs）"
-        },
-        {
-          "type": "test",
-          "ref": "`AC-136/AC-140 重叠的 li:connect：迟到的那套必须自己收尾，不得覆盖已建好的桥`（tests/integration/offscreen-flow.test.mjs）"
+          "ref": "见 AC-147、AC-149"
         }
       ],
       "files": [
         "background.js",
         "offscreen.js"
       ],
-      "notes": "automated-pass（实机 manual-pending）。Review round 1 修了 major：`disconnectAll` 先 `closeDocument()` 再 `dispatch(disconnected)`，而关文档必然掉 keepalive 端口，其 `onDisconnect` 会把「断开会议音频」误报成桥失败（落盘 bridgeFailed、角标闪 `!`、弹 li-failed 通知）；加 `closingOffscreen` 覆盖整个关闭窗口，新增用例用同步掉端口的最坏次序验证全程零通知。离屏侧新增用例断言 player 全关、会话全关、直通 track 全部 `readyState === \"ended\"`——此前这一条只能靠手测 12。macOS 橙色指示消失与面板观感仍未执行（手测 12）。 Review round 2：`li:disconnect` 的行为未改，但补上了「够不到的那套桥」这个缺口——重叠的 `li:connect` 不再孤立一整套 AudioContext 与直通 track，新增用例在放行迟到的那次之后断言活上下文与活 track 仍为 2，`li:disconnect` 之后两者都归 0。macOS 橙色指示消失与面板观感仍未执行（手测 12）。"
+      "notes": "已由 AC-147、AC-149 取代（2026-09-10 实机反馈）：不再有「断开会议音频」入口；关闭即释放。原断言按新设计不再成立，对应用例已改写到 AC-147、AC-149。"
     },
     {
       "id": "AC-141",
@@ -680,27 +692,11 @@
       "proof": [
         {
           "type": "test",
-          "ref": "`AC-141 桥丢失：撤宿主 + 通知；device_missing 时 devicechange 自动重试一次`"
+          "ref": "`AC-148 桥丢失：撤掉一切（含离屏文档）+ 通知；设备变化不会自动占用麦克风`"
         },
         {
           "type": "test",
-          "ref": "`AC-141 devicechange 不循环：桥仍失败时不再连续重试`"
-        },
-        {
-          "type": "test",
-          "ref": "`AC-141 桥失败必须通知离屏收尾翻译层，否则会话与采集留着跑`"
-        },
-        {
-          "type": "test",
-          "ref": "`AC-141/AC-105 classifyMediaError：媒体 DOMException 先按名字归类，别被压成 api_error`"
-        },
-        {
-          "type": "test",
-          "ref": "`AC-133 直通 track 被系统结束 → 上报 bridge-lost；devicechange 只上报不自作主张`（tests/integration/offscreen-flow.test.mjs）"
-        },
-        {
-          "type": "test",
-          "ref": "`AC-138/AC-141 failureCopy…`（通知正文）"
+          "ref": "`AC-122 离屏长连接断开：桥已连时判为文档丢失`"
         }
       ],
       "files": [
@@ -708,7 +704,7 @@
         "src/extension/offscreen.js",
         "src/shared/errors.mjs"
       ],
-      "notes": "automated-pass（拔插耳机 manual-pending）。Review round 1 补两处：桥失败必须发 `li:stop` 让离屏收尾（否则 AudioContext/直通 stream/会话/采集全留着跑，每次拔插再叠一套，major 3）；`classifyMediaError` 让 getUserMedia/setSinkId 的 DOMException 不再被压成 `api_error`——否则通知文案自相矛盾，且只有 `device_missing` 才触发的 devicechange 一次重试永远不会发生（minor 8）。真实拔插耳机的自动恢复仍未执行（手测 11）。"
+      "notes": "automated-pass（前半：bridge-lost → bridgeFailed + 撤宿主 + 通知）；离屏文档现在一并关闭；后半 devicechange 自动重试已由 AC-148 取代并删除"
     },
     {
       "id": "AC-142",
@@ -807,6 +803,152 @@
         "runtime-state.mjs"
       ],
       "notes": "automated-pass（macOS 显示 manual-pending）；自动化确认恰好三处 `chrome.notifications.create`、id 与正文来源；macOS 通知中心实际显示留手测 4/9"
+    },
+    {
+      "id": "AC-146",
+      "status": "pass",
+      "proof": [
+        {
+          "type": "test",
+          "ref": "`AC-146 开启途中取消（第一步）…`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-146 开启途中取消（第二步）…`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-146 开启途中取消（第三步）…`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-127/AC-142/AC-146 statusCopy…`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-146/AC-150 开启可取消、关闭即释放：SW 的接线纪律`"
+        }
+      ],
+      "files": [
+        "background.js",
+        "runtime-state.mjs",
+        "panel.js"
+      ],
+      "notes": "automated-pass（实机 manual-pending：三段步骤任一处点「取消开启」后橙色麦克风指示消失）；定点变异：取消改回 busy、宿主等待不挂取消令牌、不断开未就绪宿主端口、被取消的开启走失败流程，各自让对应用例转红"
+    },
+    {
+      "id": "AC-147",
+      "status": "pass",
+      "proof": [
+        {
+          "type": "test",
+          "ref": "`AC-147 关闭同传：宿主、翻译层、桥与离屏文档全部释放，回到初始，不发通知`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-147 关闭时关离屏文档必然掉 keepalive 端口…`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-147/AC-149 关闭保留会议静音态；SW 不再有只断开桥的入口`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-120/AC-147/AC-148 …终态都不留桥`"
+        }
+      ],
+      "files": [
+        "background.js",
+        "runtime-state.mjs"
+      ],
+      "notes": "automated-pass（实机 manual-pending：关闭后 2 s 内 macOS 橙色麦克风指示消失、pgrep 为空——这正是用户实机发现的问题）；定点变异：不关离屏文档让 10 条用例转红"
+    },
+    {
+      "id": "AC-148",
+      "status": "pass",
+      "proof": [
+        {
+          "type": "test",
+          "ref": "`AC-105/AC-148 宿主不可用…`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-105 建桥失败…`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-148 桥丢失：撤掉一切（含离屏文档）+ 通知；设备变化不会自动占用麦克风`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-123/AC-148 翻译层掉线…`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-105/AC-148 改语言时重建失败…`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-122 SW 唤醒后的恢复…`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-148 failureCopy…`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-123/AC-148 失败不自动重连；…都经 releaseAll 撤掉一切`"
+        }
+      ],
+      "files": [
+        "background.js",
+        "runtime-state.mjs"
+      ],
+      "notes": "automated-pass"
+    },
+    {
+      "id": "AC-149",
+      "status": "pass",
+      "proof": [
+        {
+          "type": "test",
+          "ref": "`AC-127/AC-149 statusCopy：已关闭 / 桥失败；没有「断开」入口`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-126/AC-149 面板不含被否决的入口…`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-121/AC-147 badgeFor…`"
+        }
+      ],
+      "files": [
+        "runtime-state.mjs",
+        "panel.js",
+        "popup.html",
+        "sidepanel.html",
+        "panel.css"
+      ],
+      "notes": "automated-pass"
+    },
+    {
+      "id": "AC-150",
+      "status": "pass",
+      "proof": [
+        {
+          "type": "test",
+          "ref": "`AC-146/AC-150 开启可取消、关闭即释放：SW 的接线纪律`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-123/AC-148 失败不自动重连；…都经 releaseAll 撤掉一切`"
+        }
+      ],
+      "files": [
+        "background.js"
+      ],
+      "notes": "automated-pass（静态检查）"
     }
   ],
   "validation": {
@@ -815,7 +957,7 @@
         "command": "npm test",
         "status": "passed",
         "exitCode": 0,
-        "artifact": "tests 172 / pass 172 / fail 0（Review round 2 修复后；round 1 后为 170/170，首轮为 152/152）"
+        "artifact": "tests 174 / pass 174 / fail 0（2026-09-10 实机反馈修改后；review round 2 后为 172/172）"
       },
       {
         "command": "npm run build:ext",
@@ -877,6 +1019,22 @@
         "newTests": 2,
         "mutationVerified": true,
         "notes": "2 个 P2 资源泄漏全部已修（updatePlan 多轮重启不受 epoch 守卫；重叠的 li:connect 孤立一整套桥），各补一条 tests/integration/offscreen-flow.test.mjs 集成用例，并给既有用例追加 1 条返回值断言；三条决定性修法都做了定点变异验证（回退后有且仅有对应用例转红）。未改任何既有断言、未动 spec 四份文档、未改 tests/unit/player-static.test.mjs 与其它遗留测试文件。manual-pending 项一项未改成已验证。"
+      },
+      {
+        "round": "field-feedback-2026-09-10",
+        "verdict": "self-verified",
+        "findings": {
+          "blocker": 0,
+          "major": 0,
+          "minor": 0
+        },
+        "commits": [
+          "本次提交"
+        ],
+        "allAddressed": true,
+        "deviations": [
+          "用户实机反馈后改契约：关闭即释放（AC-147）、开启可取消（AC-146）、失败即释放（AC-148）；AC-102/138/140 标为 deferred（已被取代）"
+        ]
       }
     ]
   },

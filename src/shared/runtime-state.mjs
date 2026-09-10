@@ -2,8 +2,9 @@ import { labelFor, padLabel } from './languages.mjs'
 
 // 运行态：两层状态机 + 全部界面/通知文案，纯转换。
 //
-// 桥（bridge）= 常驻的音频直通；翻译层（phase）= 叠在桥上的翻译会话。
-// 翻译层任何失败只改 phase，桥不动；桥失败则把翻译层一并打停。
+// 桥（bridge）= 同传开启期间的音频直通；翻译层（phase）= 叠在桥上的翻译会话。
+// 桥只在「开启中 / 进行中 / 关闭中」存在：关闭、取消、任何失败的终态都不留桥，
+// 插件在这些状态下不占用麦克风与任何音频设备（2026-09-10 实机反馈）。
 // 合法转换返回新对象且不修改入参；非法转换返回同一引用（接线层据此判重、少写一次 storage）。
 
 export const BRIDGE_DISCONNECTED = 'disconnected'
@@ -71,7 +72,7 @@ export function bridgeFailed(state, error) {
   return next
 }
 
-// 用户主动断开：回到初始，只保留会议静音态（它由会议页面决定，与桥无关）
+// 回到初始：只保留会议静音态（它由会议页面决定，与桥无关）
 export function disconnected(state) {
   return { ...createInitialRuntime(), meetingMuted: state.meetingMuted }
 }
@@ -147,29 +148,18 @@ export function requestStop(state) {
   return { ...state, phase: 'stopping', startStep: null }
 }
 
+// 关闭 / 取消完成：桥随翻译层一起撤掉，回到初始
 export function stopped(state) {
   if (state.phase !== 'stopping') return state
-  return {
-    ...state,
-    phase: 'off',
-    startStep: null,
-    error: null,
-    directions: stoppedDirections(),
-    server: null,
-    languages: null,
-    since: null,
-  }
+  return disconnected(state)
 }
 
+// 翻译层失败：接线层已把宿主、会话、桥与离屏文档一并撤掉，这里只留下错误供面板与通知展示
 export function failed(state, error) {
   return {
-    ...state,
+    ...disconnected(state),
     phase: 'error',
-    startStep: null,
     error,
-    directions: stoppedDirections(),
-    server: null,
-    languages: null,
   }
 }
 
@@ -196,7 +186,6 @@ export function badgeFor(state) {
   }
   if (state.phase === 'on' && state.meetingMuted === true) return { text: '●', color: BADGE_COLORS.muted }
   if (state.phase === 'on') return { text: '●', color: BADGE_COLORS.live }
-  if (state.bridge === BRIDGE_CONNECTED) return { text: '●', color: BADGE_COLORS.idle }
   return { text: '' }
 }
 
@@ -205,7 +194,8 @@ export function badgeFor(state) {
 export const RECOVERY_BRIDGE_LOST = '会议音频桥意外中断，请重新开启。'
 export const RECOVERY_HALF_DONE = '上次操作未完成，已重置为关闭。'
 
-// SW 顶层唤醒时调用：绝不返回任何需要占用设备的动作（connect / start 永不出现）
+// SW 顶层唤醒时调用：绝不返回任何需要占用设备的动作（connect / start 永不出现）。
+// 开启/关闭做到一半时 SW 被终止，不论桥走到哪一步都按失败收尾（撤掉一切），不留半启动状态。
 export function planRecovery({ runtime, hasNativePort, hasOffscreen }) {
   const bridge = runtime.bridge
   if ((bridge === BRIDGE_CONNECTED || bridge === BRIDGE_CONNECTING) && !hasOffscreen) {
@@ -214,7 +204,7 @@ export function planRecovery({ runtime, hasNativePort, hasOffscreen }) {
   if (bridge === BRIDGE_CONNECTED && runtime.phase === 'on' && !hasNativePort) {
     return { action: 'reconnect-host' }
   }
-  if (bridge === BRIDGE_CONNECTED && (runtime.phase === 'starting' || runtime.phase === 'stopping')) {
+  if (runtime.phase === 'starting' || runtime.phase === 'stopping') {
     return { action: 'fail-translation', error: { category: 'api_error', message: RECOVERY_HALF_DONE } }
   }
   return { action: 'none' }
@@ -238,18 +228,14 @@ export const TITLE_READY = '同传已就绪'
 
 export const PRIMARY_START = '开启同传'
 export const PRIMARY_STOP = '关闭同传'
-export const PRIMARY_STARTING = '正在开启…'
+export const PRIMARY_CANCEL = '取消开启'
 export const PRIMARY_STOPPING = '正在关闭…'
-export const SECONDARY_DISCONNECT = '断开会议音频'
 
-export const BODY_DISCONNECTED =
-  '未连接会议音频。开启后，对方说的话会翻成你要听的语言进你的耳机，你说的话会翻译后送进会议。会议里的其他人不受影响。'
-export const BODY_BRIDGE_ONLY = '原声直通中：对方的声音进你的耳机，你的声音进会议，不翻译、不计费。'
-export const BODY_STARTING = '正在连接会议音频与翻译服务，就绪后会有系统通知。'
-export const BODY_STOPPING = '正在结束翻译与本地服务，原声直通会保留。'
+export const BODY_OFF =
+  '开启后，对方说的话会翻成你要听的语言进你的耳机，你说的话会翻译后送进会议。关闭时插件不占用麦克风，也不转送会议声音。'
+export const BODY_STARTING = '正在连接会议音频与翻译服务，就绪后会有系统通知；可随时取消。'
+export const BODY_STOPPING = '正在结束翻译与本地服务，并释放麦克风。'
 
-export const SUFFIX_BRIDGE_DOWN = '会议现在听不到你，你也听不到会议。'
-export const SUFFIX_FLOOR_ALIVE = '原声仍在直通。'
 export const SUFFIX_DUCKING = '翻译播放时原声会压低。'
 
 export const NOTE_NO_MUTE_SENSE = '未感知到会议静音（仅支持 Google Meet）'
@@ -299,11 +285,9 @@ export function readyCopy({ plan, meetingMuted } = {}) {
   return `${head}${downlinkSentence(plan)}${uplinkSentence(plan, { muted: meetingMuted === true })}`
 }
 
-// 失败通知/面板正文：桥已连时明确告知原声仍在；桥失败时明确告知会议此刻不可用
-export function failureCopy({ kind, error, bridge } = {}) {
-  const message = typeof error?.message === 'string' && error.message.length > 0 ? error.message : ''
-  if (kind === 'bridge') return `${message}${SUFFIX_BRIDGE_DOWN}`
-  return `${message}${bridge === BRIDGE_CONNECTED ? SUFFIX_FLOOR_ALIVE : ''}`
+// 失败通知/面板正文：失败后插件已撤掉一切，正文只说明原因（桥失败与翻译失败靠标题区分）
+export function failureCopy({ error } = {}) {
+  return typeof error?.message === 'string' && error.message.length > 0 ? error.message : ''
 }
 
 function runningBody(plan, meetingMuted) {
@@ -318,71 +302,50 @@ function hintFor(error) {
   return label ? { label, category: error.category } : null
 }
 
+// 主按钮的四种形态：接线层只按 action 发消息、按 disabled/spinner/variant 设样式，不做判定。
+// action：start = 开启；stop = 关闭；cancel = 开启途中取消（同样发 li:power {on:false}）；null = 不可点
+const BUTTON_START = { primary: PRIMARY_START, action: 'start', variant: 'solid', spinner: false, lockFields: false }
+const BUTTON_STOP = { primary: PRIMARY_STOP, action: 'stop', variant: 'outline', spinner: false, lockFields: false }
+const BUTTON_CANCEL = { primary: PRIMARY_CANCEL, action: 'cancel', variant: 'outline', spinner: true, lockFields: true }
+const BUTTON_STOPPING = { primary: PRIMARY_STOPPING, action: null, variant: 'outline', spinner: true, lockFields: true }
+
 // 面板渲染的唯一真值：接线层不再做任何状态判定，只把返回值填进 DOM。
 export function statusCopy({ bridge, bridgeError, phase, startStep, error, plan, meetingMuted, directions } = {}) {
-  const secondary = bridge === BRIDGE_CONNECTED ? SECONDARY_DISCONNECT : null
-
-  if (bridge === BRIDGE_FAILED) {
-    return {
-      title: TITLE_BRIDGE_FAILED,
-      body: failureCopy({ kind: 'bridge', error: bridgeError }),
-      tone: 'danger',
-      primary: PRIMARY_START,
-      secondary: null,
-      stepText: null,
-      note: null,
-      hint: hintFor(bridgeError),
-    }
-  }
+  const quiet = { stepText: null, note: null, hint: null }
 
   if (phase === 'starting') {
     return {
+      ...BUTTON_CANCEL,
+      ...quiet,
       title: TITLE_STARTING,
       body: BODY_STARTING,
       tone: 'progress',
-      primary: PRIMARY_STARTING,
-      secondary,
       stepText: STEP_TEXT[startStep] ?? null,
-      note: null,
-      hint: null,
     }
   }
 
   if (phase === 'stopping') {
-    return {
-      title: TITLE_STOPPING,
-      body: BODY_STOPPING,
-      tone: 'progress',
-      primary: PRIMARY_STOPPING,
-      secondary,
-      stepText: null,
-      note: null,
-      hint: null,
-    }
+    return { ...BUTTON_STOPPING, ...quiet, title: TITLE_STOPPING, body: BODY_STOPPING, tone: 'progress' }
   }
 
-  if (bridge === BRIDGE_CONNECTING) {
+  if (bridge === BRIDGE_FAILED) {
     return {
-      title: TITLE_STARTING,
-      body: BODY_STARTING,
-      tone: 'progress',
-      primary: PRIMARY_STARTING,
-      secondary: null,
-      stepText: STEP_TEXT.bridge,
-      note: null,
-      hint: null,
+      ...BUTTON_START,
+      ...quiet,
+      title: TITLE_BRIDGE_FAILED,
+      body: failureCopy({ error: bridgeError }),
+      tone: 'danger',
+      hint: hintFor(bridgeError),
     }
   }
 
   if (phase === 'error') {
     return {
+      ...BUTTON_START,
+      ...quiet,
       title: TITLE_TRANSLATION_FAILED,
-      body: failureCopy({ kind: 'translation', error, bridge }),
+      body: failureCopy({ error }),
       tone: 'danger',
-      primary: PRIMARY_START,
-      secondary,
-      stepText: null,
-      note: null,
       hint: hintFor(error),
     }
   }
@@ -393,40 +356,16 @@ export function statusCopy({ bridge, bridgeError, phase, startStep, error, plan,
     if (resuming) note = NOTE_RESUMING
     else if (meetingMuted === null) note = NOTE_NO_MUTE_SENSE
     return {
+      ...BUTTON_STOP,
+      ...quiet,
       title: TITLE_ON,
       body: runningBody(plan, meetingMuted),
       tone: meetingMuted === true ? 'warning' : 'live',
-      primary: PRIMARY_STOP,
-      secondary,
-      stepText: null,
       note,
-      hint: null,
     }
   }
 
-  if (bridge === BRIDGE_CONNECTED) {
-    return {
-      title: TITLE_OFF,
-      body: BODY_BRIDGE_ONLY,
-      tone: 'idle',
-      primary: PRIMARY_START,
-      secondary,
-      stepText: null,
-      note: null,
-      hint: null,
-    }
-  }
-
-  return {
-    title: TITLE_OFF,
-    body: BODY_DISCONNECTED,
-    tone: 'idle',
-    primary: PRIMARY_START,
-    secondary: null,
-    stepText: null,
-    note: null,
-    hint: null,
-  }
+  return { ...BUTTON_START, ...quiet, title: TITLE_OFF, body: BODY_OFF, tone: 'idle' }
 }
 
 // 写进 storage.session 的 server 只留这两项：launchToken / mockWsUrl / baseUrl 绝不落盘

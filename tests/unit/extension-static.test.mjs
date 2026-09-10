@@ -130,16 +130,53 @@ test('AC-122/AC-139 顶层与安装/启动钩子绝不占用设备', async () =>
   }
 })
 
-test('AC-123 翻译层失败不自动重连；桥失败与翻译失败分开处理', async () => {
+test('AC-123/AC-148 失败不自动重连；桥失败与翻译失败都经 releaseAll 撤掉一切', async () => {
   const src = await read('background.js')
   assert.ok(!/setInterval\(/.test(src), 'SW 不得有轮询重连循环')
   assert.ok(!/retry|reconnectLoop/i.test(blockFrom(src, 'async function failTranslation(')), '翻译层失败后不得自动重连')
+  assert.ok(!/retryBridgeAfterDeviceChange|lastDeviceRetryAt/.test(src), '设备变化不得自动重连（会在非开启状态下重新占用麦克风）')
   const failBridge = blockFrom(src, 'async function failBridge(')
-  assert.ok(/disconnectHost\(\)/.test(failBridge), '桥失败必须一并撤掉宿主')
-  assert.ok(/bridgeFailed\(state, error\)/.test(failBridge))
+  assert.ok(/releaseAll\(\(\) => bridgeFailed\(state, error\)\)/.test(failBridge), '桥失败必须撤掉一切')
   const failTranslation = blockFrom(src, 'async function failTranslation(')
-  assert.ok(/'li:stop'/.test(failTranslation), '翻译层失败只撤翻译层')
-  assert.ok(!/'li:disconnect'/.test(failTranslation), '翻译层失败绝不撤桥')
+  assert.ok(/releaseAll\(\(\) => failed\(state, error\)\)/.test(failTranslation), '翻译层失败同样撤掉一切')
+  const release = blockFrom(src, 'async function releaseAll(')
+  assert.ok(/disconnectHost\(\)/.test(release), 'releaseAll 必须撤宿主')
+  assert.ok(/'li:disconnect'/.test(release), 'releaseAll 必须让离屏停掉会话、采集、播放器与直通 track')
+  assert.ok(/chrome\.offscreen\.closeDocument\(\)/.test(release), 'releaseAll 必须关闭离屏文档')
+  assert.ok(/closingOffscreen = true[\s\S]*closeDocument[\s\S]*dispatch\(finalState\(\)\)[\s\S]*finally/.test(release), '终态必须在关文档窗口内落盘')
+})
+
+test('AC-146/AC-150 开启可取消、关闭即释放：SW 的接线纪律', async () => {
+  const src = await read('background.js')
+  const handlers = blockFrom(src, 'const UI_HANDLERS = {')
+  assert.deepEqual(
+    [...handlers.matchAll(/^  '(li:[a-z-]+)':/gm)].map((m) => m[1]),
+    ['li:power', 'li:set-settings'],
+    'UI 只剩开关与设置两种消息，不再有只断开桥的入口'
+  )
+  assert.ok(
+    /message\.on === false && state\.phase === 'starting'\) return cancelStart\(\)/.test(handlers),
+    '开启中收到 li:power {on:false} 必须走取消，而不是 busy'
+  )
+  const cancel = blockFrom(src, 'async function cancelStart(')
+  assert.ok(/run\.abort\(\)/.test(cancel), '取消必须让在途的长等待立刻结束')
+  assert.ok(/await run\.done/.test(cancel), '必须等 start() 退栈后再收尾，避免它之后再建东西')
+  assert.ok(/releaseAll\(\(\) => stopped\(state\)\)/.test(cancel))
+  assert.ok(!/chrome\.notifications/.test(cancel), '取消不通知')
+  assert.ok(/releaseAll\(\(\) => stopped\(state\)\)/.test(blockFrom(src, 'async function stop(')), '关闭即释放一切')
+
+  // start() 与建桥的每段长等待都挂上取消令牌；被取消时静默返回，不报失败
+  for (const fn of ['async function start(', 'async function connectBridge(']) {
+    const body = blockFrom(src, fn)
+    const waits = (body.match(/withTimeout\(/g) ?? []).length
+    const cancellable = (body.match(/withTimeout\([\s\S]*?,\s*run\s*\)/g) ?? []).length
+    assert.ok(waits > 0 && waits === cancellable, `${fn} 的每个 withTimeout 都必须带 run`)
+    assert.ok((body.match(/checkpoint\(run\)/g) ?? []).length >= 2, `${fn} 在副作用之前必须检查是否已取消`)
+  }
+  assert.ok(/if \(run\.cancelled\) return/.test(blockFrom(src, 'async function start(')), '被取消的开启不得走失败流程')
+  // 还没 ready 的宿主端口也要能断开，否则取消后宿主进程留着
+  const disconnectHost = blockFrom(src, 'function disconnectHost(')
+  assert.ok(/pendingHostPort/.test(disconnectHost))
 })
 
 test('AC-145 通知只在就绪/翻译失败/桥失败三处发出，正文只来自纯函数', async () => {
@@ -157,9 +194,10 @@ test('AC-145 通知只在就绪/翻译失败/桥失败三处发出，正文只�
   for (const call of calls) {
     assert.ok(/iconUrl: 'icons\/icon128\.png'/.test(call) || call.includes('NOTIFICATION_STYLE'))
   }
-  // stopped / disconnected 不通知
-  assert.ok(!/chrome\.notifications/.test(blockFrom(src, 'async function stop(')))
-  assert.ok(!/chrome\.notifications/.test(blockFrom(src, 'async function disconnectAll(')))
+  // 关闭、取消、撤掉一切本身都不通知（失败通知由 failBridge / failTranslation 在其后单独发）
+  for (const fn of ['async function stop(', 'async function cancelStart(', 'async function releaseAll(']) {
+    assert.ok(!/chrome\.notifications/.test(blockFrom(src, fn)), `${fn} 不得发通知`)
+  }
 })
 
 test('AC-131/AC-132 上行暂停：SW 只转发，离屏只经 forwardMicAudio 门控', async () => {
@@ -353,7 +391,9 @@ test('AC-106 面板只渲染 storage，不做状态判定也不碰设备', async
   assert.ok(/chrome\.storage\.local\.get\('settings'\)/.test(src) && /chrome\.storage\.session\.get\('runtime'\)/.test(src))
   // 面板只发消息，不自己动手
   const sends = [...src.matchAll(/type: '(li:[a-z-]+)'/g)].map((m) => m[1])
-  assert.deepEqual(new Set(sends), new Set(['li:power', 'li:disconnect', 'li:set-settings']), `面板只允许发这三种消息：${sends}`)
+  assert.deepEqual(new Set(sends), new Set(['li:power', 'li:set-settings']), `面板只允许发这两种消息：${sends}`)
+  assert.ok(/view\.power\.disabled = copy\.action === null/.test(src), '按钮可点与否来自 statusCopy')
+  assert.ok(/on: copy\.action === 'start'/.test(src), '开、关、取消都由 statusCopy 的 action 决定')
   assert.ok(!sends.includes('li:connect'), 'UI 层没有只建桥不翻译的入口')
 })
 
@@ -385,13 +425,11 @@ test('AC-126 面板文案齐备：状态、步骤、字段、按钮、脚注', a
   const required = [
     '会议同传',
     'Live Interpreter',
-    '未连接会议音频',
     '无法连接会议音频',
     '同传已关闭',
-    '原声直通中',
+    '关闭时插件不占用麦克风',
     '同传进行中',
     '无法开启同传',
-    '原声仍在直通',
     '会议已静音',
     '暂停翻译你的话',
     '未感知到会议静音',
@@ -403,8 +441,8 @@ test('AC-126 面板文案齐备：状态、步骤、字段、按钮、脚注', a
     '对方听的语言',
     '开启同传',
     '关闭同传',
-    '断开会议音频',
-    '正在开启…',
+    '取消开启',
+    '可随时取消',
     '正在关闭…',
     '开启时会在本机启动翻译服务，对话会多一到两秒延迟。',
   ]
@@ -413,23 +451,26 @@ test('AC-126 面板文案齐备：状态、步骤、字段、按钮、脚注', a
   }
 })
 
-test('AC-126 面板不含被否决的入口：你说的语言 / 只连接原声 / 重试 / 静音 / 恢复翻译按钮', async () => {
+test('AC-126/AC-149 面板不含被否决的入口：你说的语言 / 只连接原声 / 重试 / 断开会议音频 / 原声直通 / 静音按钮', async () => {
   const surface = await panelSurface()
-  for (const text of ['你说的语言', '只连接原声', '重试']) {
+  for (const text of ['你说的语言', '只连接原声', '重试', '断开会议音频', '原声直通', '原声仍在直通']) {
     assert.ok(!surface.includes(text), `面板不得出现「${text}」`)
   }
+  const popup = await read('popup.html')
+  const side = await read('sidepanel.html')
+  assert.ok(!/id="disconnect"/.test(popup) && !/id="disconnect"/.test(side), '模板里不得再有断开按钮')
   // 「静音」「恢复翻译」只能作为说明文字出现，不得成为按钮
-  const { PRIMARY_START, PRIMARY_STOP, PRIMARY_STARTING, PRIMARY_STOPPING, SECONDARY_DISCONNECT, HINTS } = await import(
+  const { PRIMARY_START, PRIMARY_STOP, PRIMARY_CANCEL, PRIMARY_STOPPING, HINTS } = await import(
     '../../src/shared/runtime-state.mjs'
   )
-  const buttonLabels = [PRIMARY_START, PRIMARY_STOP, PRIMARY_STARTING, PRIMARY_STOPPING, SECONDARY_DISCONNECT, ...Object.values(HINTS)]
+  const buttonLabels = [PRIMARY_START, PRIMARY_STOP, PRIMARY_CANCEL, PRIMARY_STOPPING, ...Object.values(HINTS)]
+  for (const label of buttonLabels) assert.equal(typeof label, 'string', '按钮文案必须都有定义')
   for (const label of buttonLabels) {
     for (const banned of ['静音', '恢复翻译', '重试']) {
       assert.ok(!label.includes(banned), `按钮文案「${label}」不得含「${banned}」`)
     }
   }
   // HTML 里的按钮文本一律由脚本填充，模板中没有写死的操作按钮
-  const popup = await read('popup.html')
   const buttonTexts = [...popup.matchAll(/<button[^>]*>([^<]*)</g)].map((m) => m[1].trim()).filter(Boolean)
   assert.deepEqual(buttonTexts, [], `按钮文案必须来自 statusCopy，模板里不得写死：${buttonTexts}`)
 })

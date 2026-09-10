@@ -199,6 +199,22 @@ Rollback / Safety:
 
 - 文档变更
 
+### Chunk 7: 实机反馈——关闭即释放、开启可取消（2026-09-10）
+
+Goal: 关闭、取消、任何失败都不占用麦克风；开启中可取消。
+
+Files:
+
+- `src/shared/runtime-state.mjs` - `stopped`/`failed` 终态不留桥；`statusCopy` 返回按钮 action/variant/spinner/lockFields；去掉断开入口与「原声直通」文案
+- `src/extension/background.js` - `releaseAll`、`cancelStart`、开启取消令牌（`beginStart`/`checkpoint`/带 `run` 的 `withTimeout`）、未就绪宿主端口也可断开；移除 `li:disconnect` UI 处理与 devicechange 自动重连
+- `src/extension/panel.js`、`popup.html`、`sidepanel.html`、`panel.css`、`options.html` - 取消开启、去掉断开链接、选项页补充关闭后的影响
+- `tests/unit/runtime-state.test.mjs`、`tests/integration/background-flow.test.mjs`、`tests/unit/extension-static.test.mjs` - AC-146～AC-150
+
+Verification:
+
+- [x] `npm test` 174/174；5 处定点变异各自让对应用例转红
+- [ ] 实机：关闭后橙色麦克风指示消失；三段步骤任一处取消都立即回到关闭
+
 ## Testing Plan
 
 | Layer | Files / Command | Acceptance Criteria Covered |

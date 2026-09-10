@@ -3,7 +3,6 @@ import {
   connectRequested,
   bridgeConnected,
   bridgeFailed,
-  disconnected,
   requestStart,
   hostReady,
   started,
@@ -30,8 +29,9 @@ import { classifyError } from '/shared/errors.mjs'
 // Service worker：桥与翻译层的编排者。只做接线——所有状态转换都经
 // /shared/runtime-state.mjs 的纯函数，所有文案都来自那里的 copy 函数。
 //
-// 不自动连接：占用设备的动作（创建离屏文档、getUserMedia、connectNative）
-// 只由 li:power {on:true} 触发，外加桥因缺设备失败后 devicechange 的一次重试。
+// 只在同传开启期间占用设备：创建离屏文档、getUserMedia、connectNative 只由
+// li:power {on:true} 触发；关闭、开启途中取消、任何失败都经 releaseAll 把宿主、
+// 翻译层、桥与离屏文档一次撤干净，插件在非开启状态下不占用麦克风。
 
 const HOST_NAME = 'com.live_interpreter.host'
 const MEET_ORIGIN = 'https://meet.google.com/'
@@ -39,33 +39,57 @@ const OFFSCREEN_PATH = 'offscreen.html'
 
 const TIMEOUT = { connect: 10000, host: 10000, start: 15000, recover: 15000 }
 
-const DEVICE_RETRY_COOLDOWN_MS = 1000
-
 let state = createInitialRuntime()
 let nativePort = null
+// connectNative 已发出、还没等到 ready 的宿主端口：取消开启时也要能把它断掉，否则宿主进程留着
+let pendingHostPort = null
 let hostReadyFrame = null
 let muteReports = []
-let lastDeviceRetryAt = 0
 let busy = false
 // 我们自己在关离屏文档的窗口：此间 keepalive 端口断开是预期的，不是桥丢失
 let closingOffscreen = false
+// 在途的一次开启（见 beginStart）：取消开启靠它让 start() 的所有长等待立刻结束
+let currentStart = null
+
+// 被取消的开启不是失败：不落 error、不发通知，收尾由 cancelStart 统一完成
+const START_CANCELLED = { category: 'api_error', message: '已取消开启。' }
 
 // ---------------------------------------------------------------- 基础设施
 
-function withTimeout(promise, ms, message) {
+// 超时与取消都会让等待立刻结束；run 为本次开启的取消令牌（可缺省）
+function withTimeout(promise, ms, message, run) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject({ category: 'api_error', message }), ms)
-    promise.then(
-      (value) => {
-        clearTimeout(timer)
-        resolve(value)
-      },
-      (err) => {
-        clearTimeout(timer)
-        reject(err)
-      }
-    )
+    const settle = (finish) => (value) => {
+      clearTimeout(timer)
+      finish(value)
+    }
+    promise.then(settle(resolve), settle(reject))
+    run?.aborted.catch(settle(reject))
   })
+}
+
+// 一次开启的取消令牌：abort() 让所有挂在 withTimeout 上的长等待以 START_CANCELLED 立刻结束；
+// done 在 start() 退栈时兑现，取消方据此确认它之后不会再有任何副作用
+function beginStart() {
+  const run = { cancelled: false }
+  run.aborted = new Promise((_, reject) => {
+    run.abort = () => {
+      run.cancelled = true
+      reject(START_CANCELLED)
+    }
+  })
+  run.aborted.catch(() => {})
+  run.done = new Promise((resolve) => {
+    run.finish = resolve
+  })
+  currentStart = run
+  return run
+}
+
+// 每个副作用之前都确认本次开启还算数：取消发生在两次 await 之间也不会漏做收尾之外的事
+function checkpoint(run) {
+  if (run.cancelled) throw START_CANCELLED
 }
 
 // 唯一的状态出口：同引用即无变化，否则落盘 + 刷角标
@@ -108,20 +132,23 @@ async function ensureOffscreen() {
 
 // ---------------------------------------------------------------- 宿主
 
+// 已就绪的与还在等 ready 的宿主端口一并断开：端口一断，Chrome 就结束宿主进程
 function disconnectHost() {
-  const port = nativePort
+  const ports = [nativePort, pendingHostPort].filter(Boolean)
   nativePort = null
+  pendingHostPort = null
   hostReadyFrame = null
-  if (!port) return
-  try {
-    port.postMessage({ type: 'shutdown' })
-  } catch {
-    // 端口已断
-  }
-  try {
-    port.disconnect()
-  } catch {
-    // 忽略
+  for (const port of ports) {
+    try {
+      port.postMessage({ type: 'shutdown' })
+    } catch {
+      // 端口已断
+    }
+    try {
+      port.disconnect()
+    } catch {
+      // 忽略
+    }
   }
 }
 
@@ -135,9 +162,13 @@ function connectHost() {
       reject(classifyNativeError(err?.message))
       return
     }
+    pendingHostPort = port
     port.onMessage.addListener((frame) => {
+      // 已被取消开启断掉的端口：迟到的 ready 一律不认
+      if (settled || pendingHostPort !== port) return
       if (frame?.type === 'ready') {
         settled = true
+        pendingHostPort = null
         nativePort = port
         hostReadyFrame = frame
         resolve(frame)
@@ -145,6 +176,7 @@ function connectHost() {
       }
       if (frame?.type === 'error') {
         settled = true
+        pendingHostPort = null
         reject(classifyError(frame))
       }
     })
@@ -152,6 +184,7 @@ function connectHost() {
       const reason = classifyNativeError(chrome.runtime.lastError?.message)
       if (!settled) {
         settled = true
+        if (pendingHostPort === port) pendingHostPort = null
         reject(reason)
         return
       }
@@ -175,13 +208,31 @@ function serverConfig() {
   }
 }
 
-// ---------------------------------------------------------------- 四条流程
+// ---------------------------------------------------------------- 流程
 
-async function connectBridge() {
+// 不在同传中就不占任何设备：关闭、取消、失败都经这里把宿主、翻译层、桥与离屏文档一次撤干净。
+// 最后落盘的终态由调用方给出（关闭/取消 → 初始；失败 → error），且在关离屏文档的窗口内落盘，
+// 这样关文档必然掉的 keepalive 端口不会被误判成桥丢失。
+async function releaseAll(finalState) {
+  disconnectHost()
+  // li:disconnect 先撤翻译层（作废在途启动、关会话与采集）再停播放器与直通 track
+  await toOffscreen({ type: 'li:disconnect' }).catch(() => {})
+  closingOffscreen = true
+  try {
+    if (await hasOffscreen()) await chrome.offscreen.closeDocument()
+    await dispatch(finalState())
+  } finally {
+    closingOffscreen = false
+  }
+}
+
+async function connectBridge(run) {
   const settings = await readSettings()
+  checkpoint(run)
   await dispatch(connectRequested(state))
   try {
     await ensureOffscreen()
+    checkpoint(run)
     const response = await withTimeout(
       toOffscreen({
         type: 'li:connect',
@@ -189,24 +240,23 @@ async function connectBridge() {
         floorLevel: settings.floorLevel,
       }),
       TIMEOUT.connect,
-      '连接会议音频超时：请检查音频设备后重试。'
+      '连接会议音频超时：请检查音频设备后重试。',
+      run
     )
+    checkpoint(run)
     await dispatch(bridgeConnected(state))
     return response
   } catch (err) {
+    // 取消由 cancelStart 统一收尾，这里不报桥失败
+    if (run.cancelled) throw START_CANCELLED
     await failBridge(classifyError(err))
     throw err
   }
 }
 
-// 桥失败：撤一切（含宿主），离屏文档保留以便监听 devicechange。
-// 必须通知离屏收尾翻译层：否则会话、采集、直通 stream 与 AudioContext 全留着跑，
-// 下一次 li:connect 又叠一套，每次拔插累积一份占用。发 li:stop 而不是 li:disconnect——
-// spec 要求保留离屏文档继续监听 devicechange。
+// 桥失败（预检、授权、设备断开、离屏丢失）：撤掉一切并通知
 async function failBridge(error) {
-  disconnectHost()
-  await toOffscreen({ type: 'li:stop' }).catch(() => {})
-  await dispatch(bridgeFailed(state, error))
+  await releaseAll(() => bridgeFailed(state, error))
   chrome.notifications.create(NOTIFY.bridgeFailed.id, {
     ...NOTIFICATION_STYLE,
     title: NOTIFY.bridgeFailed.title,
@@ -214,30 +264,27 @@ async function failBridge(error) {
   })
 }
 
-// 翻译层失败：只撤翻译层与宿主，桥与直通保持
+// 翻译层失败（宿主、凭证、网络、改语言重建）：同样撤掉一切并通知，失败态不占用麦克风
 async function failTranslation(error) {
-  try {
-    await toOffscreen({ type: 'li:stop' })
-  } catch {
-    // 离屏已不可用时尽力而为
-  }
-  disconnectHost()
-  await dispatch(failed(state, error))
+  await releaseAll(() => failed(state, error))
   chrome.notifications.create(NOTIFY.translationFailed.id, {
     ...NOTIFICATION_STYLE,
     title: NOTIFY.translationFailed.title,
-    message: failureCopy({ kind: 'translation', error, bridge: state.bridge }),
+    message: failureCopy({ kind: 'translation', error }),
   })
 }
 
 async function start() {
   const requested = requestStart(state)
   if (requested === state) return
-  const settings = await readSettings()
-  await dispatch(requested)
+  const run = beginStart()
   try {
-    if (state.bridge !== 'connected') await connectBridge()
-    await withTimeout(connectHost(), TIMEOUT.host, '启动本地翻译服务超时：请重试或查看宿主日志。')
+    await dispatch(requested)
+    const settings = await readSettings()
+    checkpoint(run)
+    await connectBridge(run)
+    await withTimeout(connectHost(), TIMEOUT.host, '启动本地翻译服务超时：请重试或查看宿主日志。', run)
+    checkpoint(run)
     await dispatch(hostReady(state))
     const plan = buildDirections(settings)
     const response = await withTimeout(
@@ -248,8 +295,10 @@ async function start() {
         server: serverConfig(),
       }),
       TIMEOUT.start,
-      '连接翻译服务超时：请检查网络后重试。'
+      '连接翻译服务超时：请检查网络后重试。',
+      run
     )
+    checkpoint(run)
     await dispatch(
       started(state, {
         directions: response.directions,
@@ -264,44 +313,36 @@ async function start() {
       message: readyCopy({ plan, meetingMuted: state.meetingMuted }),
     })
   } catch (err) {
-    // 桥失败已在 connectBridge 里通知过，不再重复报翻译层失败
+    // 被取消：cancelStart 负责收尾，不落 error、不发通知
+    if (run.cancelled) return
+    // 桥失败已在 connectBridge 里撤干净并通知过，不再重复报翻译层失败
     if (state.bridge === 'failed') throw err
     await failTranslation(classifyError(err))
     throw err
+  } finally {
+    if (currentStart === run) currentStart = null
+    run.finish()
   }
 }
 
+// 开启途中点「取消开启」：先让在途的 start() 所有长等待立刻结束、退栈后不再有副作用，
+// 再把已经建起来的一切（桥、宿主、会话、离屏文档）撤干净，回到初始且不发任何通知
+async function cancelStart() {
+  const run = currentStart
+  if (!run || run.cancelled) return { ok: false, reason: 'busy' }
+  run.abort()
+  await dispatch(requestStop(state))
+  await run.done
+  await releaseAll(() => stopped(state))
+  return { ok: true }
+}
+
+// 关闭同传：翻译、本地服务、麦克风与音频设备全部释放
 async function stop() {
   const requested = requestStop(state)
   if (requested === state) return
   await dispatch(requested)
-  try {
-    await toOffscreen({ type: 'li:stop' })
-  } catch {
-    // 离屏已不可用：翻译层无论如何都算停了
-  }
-  disconnectHost()
-  await dispatch(stopped(state))
-}
-
-async function disconnectAll() {
-  if (state.phase === 'on' || state.phase === 'starting') await stop()
-  disconnectHost()
-  try {
-    await toOffscreen({ type: 'li:disconnect' })
-  } catch {
-    // 离屏已不可用
-  }
-  // 关闭离屏文档必然掉 keepalive 端口。这面旗子让 onDisconnect 知道是我们自己关的，
-  // 否则「断开会议音频」会被误判成「文档被 Chrome 关掉」→ 落盘 bridgeFailed、角标闪
-  // `!`、弹 li-failed 通知，违反 AC-140 与「disconnected 不通知」。
-  closingOffscreen = true
-  try {
-    if (await hasOffscreen()) await chrome.offscreen.closeDocument()
-    await dispatch(disconnected(state))
-  } finally {
-    closingOffscreen = false
-  }
+  await releaseAll(() => stopped(state))
 }
 
 // 同一时刻只允许一条流程在跑：UI 已禁用按钮，这里是最后一道闸
@@ -385,38 +426,24 @@ async function onPipelineEvent(message) {
     return
   }
   if (message.event === 'bridge-lost') {
-    await failBridge(classifyError(message.payload))
+    // 已撤掉的桥迟到的上报不再算数，否则会多弹一条失败通知
+    if (state.bridge === 'connected' || state.bridge === 'connecting') await failBridge(classifyError(message.payload))
     return
   }
-  if (message.event === 'devicechange') {
-    await retryBridgeAfterDeviceChange()
-    return
-  }
-  // error / closed：翻译层失败，桥保持；绝不自动重连
+  // 设备变化不触发任何动作：不在同传中不占设备；同传中设备真掉了会由 bridge-lost 上报
+  if (message.event === 'devicechange') return
+  // error / closed：翻译层失败，撤掉一切；绝不自动重连
   if (state.phase === 'on' || state.phase === 'starting') {
     await failTranslation(classifyError(message.payload))
   }
 }
 
-// 缺设备导致的桥失败，插回设备时自动重试一次。
-// 冷却窗口保证「同一次 devicechange（系统常连发数条）至多重试一次」，
-// 且失败后不自我循环——下一次重试必须由用户真的插拔设备触发。
-async function retryBridgeAfterDeviceChange() {
-  if (state.bridge !== 'failed' || state.bridgeError?.category !== 'device_missing') return
-  const now = Date.now()
-  if (now - lastDeviceRetryAt < DEVICE_RETRY_COOLDOWN_MS) return
-  lastDeviceRetryAt = now
-  await exclusive(() => connectBridge())
-}
-
 const UI_HANDLERS = {
   'li:power': (message) => {
+    // 开启途中点「取消开启」：唯一允许在过渡态进来的操作
+    if (message.on === false && state.phase === 'starting') return cancelStart()
     if (isTransitioning()) return Promise.resolve({ ok: false, reason: 'busy' })
     return exclusive(() => (message.on ? start() : stop()))
-  },
-  'li:disconnect': () => {
-    if (isTransitioning()) return Promise.resolve({ ok: false, reason: 'busy' })
-    return exclusive(() => disconnectAll())
   },
   'li:set-settings': async (message) => {
     const { type, to, ...patch } = message
@@ -459,7 +486,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   if (muteReports.length !== before) void applyMeetingMute(resolveMeetingMuted(muteReports))
 })
 
-// 离屏文档的长连接：桥还在却断了连接，说明文档被 Chrome 关掉了
+// 离屏文档的长连接：桥还在却断了连接，说明文档被 Chrome 关掉了（我们自己关的除外）
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'li-keepalive') return
   port.onMessage.addListener((message) => {

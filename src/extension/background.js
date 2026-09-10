@@ -47,6 +47,8 @@ let hostReadyFrame = null
 let muteReports = []
 let lastDeviceRetryAt = 0
 let busy = false
+// 我们自己在关离屏文档的窗口：此间 keepalive 端口断开是预期的，不是桥丢失
+let closingOffscreen = false
 
 // ---------------------------------------------------------------- 基础设施
 
@@ -197,9 +199,13 @@ async function connectBridge() {
   }
 }
 
-// 桥失败：撤一切（含宿主），离屏文档保留以便监听 devicechange
+// 桥失败：撤一切（含宿主），离屏文档保留以便监听 devicechange。
+// 必须通知离屏收尾翻译层：否则会话、采集、直通 stream 与 AudioContext 全留着跑，
+// 下一次 li:connect 又叠一套，每次拔插累积一份占用。发 li:stop 而不是 li:disconnect——
+// spec 要求保留离屏文档继续监听 devicechange。
 async function failBridge(error) {
   disconnectHost()
+  await toOffscreen({ type: 'li:stop' }).catch(() => {})
   await dispatch(bridgeFailed(state, error))
   chrome.notifications.create(NOTIFY.bridgeFailed.id, {
     ...NOTIFICATION_STYLE,
@@ -286,8 +292,16 @@ async function disconnectAll() {
   } catch {
     // 离屏已不可用
   }
-  if (await hasOffscreen()) await chrome.offscreen.closeDocument()
-  await dispatch(disconnected(state))
+  // 关闭离屏文档必然掉 keepalive 端口。这面旗子让 onDisconnect 知道是我们自己关的，
+  // 否则「断开会议音频」会被误判成「文档被 Chrome 关掉」→ 落盘 bridgeFailed、角标闪
+  // `!`、弹 li-failed 通知，违反 AC-140 与「disconnected 不通知」。
+  closingOffscreen = true
+  try {
+    if (await hasOffscreen()) await chrome.offscreen.closeDocument()
+    await dispatch(disconnected(state))
+  } finally {
+    closingOffscreen = false
+  }
 }
 
 // 同一时刻只允许一条流程在跑：UI 已禁用按钮，这里是最后一道闸
@@ -415,8 +429,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.to !== 'sw') return false
 
   if (message.type === 'li:meeting-mute') {
-    // 只信任来自 Meet 标签页的上报
-    if (!sender.tab?.url?.startsWith(MEET_ORIGIN)) return false
+    // 只信任来自 Meet 标签页的上报。本扩展没有 tabs 权限、也没有 meet 的 host
+    // permission（content_scripts.matches 不算），Chrome 会把 sender.tab.url 裁成
+    // undefined；sender.url 与 sender.tab.id 都不被裁剪，所以两处任一命中即可信。
+    if (!sender.tab?.url?.startsWith(MEET_ORIGIN) && !sender.url?.startsWith(MEET_ORIGIN)) return false
+    if (sender.tab?.id === undefined) return false
     recordMuteReport(sender.tab.id, parseMeetMuteState({ buttons: message.buttons }))
     void applyMeetingMute(resolveMeetingMuted(muteReports))
     return false
@@ -449,6 +466,7 @@ chrome.runtime.onConnect.addListener((port) => {
     if (message?.type === 'ping') port.postMessage({ type: 'pong' })
   })
   port.onDisconnect.addListener(() => {
+    if (closingOffscreen) return
     if (state.bridge === 'connected' || state.bridge === 'connecting') {
       void failBridge({ category: 'api_error', message: '会议音频桥意外中断，请重新开启。' })
     }

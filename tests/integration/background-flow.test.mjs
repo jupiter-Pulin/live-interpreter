@@ -68,6 +68,9 @@ function createEnv({ session = {}, local = {}, offscreenExists = false } = {}) {
     runtime: () => storage.session.runtime,
     lastBadge: () => badges[badges.length - 1],
     hasDocument: () => documentExists,
+    setDocument: (exists) => {
+      documentExists = exists
+    },
     async toSw(message, sender = {}) {
       let response
       for (const listener of swListeners) {
@@ -540,6 +543,82 @@ test('AC-132/AC-144 非 Meet 来源忽略；phase=off 时只记静音态；标�
     env.notifications[0].message.includes('你在会议里已静音'),
     `就绪通知应写明已静音：${env.notifications[0].message}`
   )
+})
+
+test('AC-131/AC-144 没有 tabs 权限时 sender.tab.url 被裁掉，靠 sender.url 仍认得 Meet 上报', async () => {
+  const env = createEnv()
+  await loadBackground(env)
+  await powerOn(env)
+
+  // 真实 Chrome 里本扩展没有 tabs 权限也没有 meet 的 host permission，
+  // sender.tab.url 会被裁成 undefined，只剩 sender.url 与 sender.tab.id
+  await env.toSw(
+    { type: 'li:meeting-mute', to: 'sw', platform: 'meet', buttons: [{ dataIsMuted: 'true', text: 'mic_off' }] },
+    { tab: { id: 7 }, url: 'https://meet.google.com/abc-defg-hij' }
+  )
+  assert.equal(env.runtime().meetingMuted, true, 'sender.tab.url 缺失时必须改用 sender.url 判定')
+  assert.deepEqual(env.lastBadge(), { text: '●', color: BADGE_COLORS.muted })
+  const pause = env.offscreenCalls.filter((m) => m.type === 'li:set-uplink-paused')
+  assert.deepEqual(pause[pause.length - 1], { type: 'li:set-uplink-paused', to: 'offscreen', paused: true })
+
+  // 同样裁剪形态但来自别的站点：必须忽略
+  await env.toSw(
+    { type: 'li:meeting-mute', to: 'sw', platform: 'meet', buttons: [{ dataIsMuted: 'false', text: 'mic' }] },
+    { tab: { id: 9 }, url: 'https://zoom.us/j/1' }
+  )
+  assert.equal(env.runtime().meetingMuted, true, '非 Meet 的 sender.url 不得改写静音态')
+
+  // 连 tab.id 都没有的上报（非内容脚本来源）同样忽略，且不得抛出
+  await env.toSw(
+    { type: 'li:meeting-mute', to: 'sw', platform: 'meet', buttons: [{ dataIsMuted: 'false', text: 'mic' }] },
+    { url: 'https://meet.google.com/abc-defg-hij' }
+  )
+  assert.equal(env.runtime().meetingMuted, true, '没有 tabId 的上报无法按标签记账，必须忽略')
+})
+
+test('AC-141 桥失败必须通知离屏收尾翻译层，否则会话与采集留着跑', async () => {
+  const env = createEnv()
+  await loadBackground(env)
+  await powerOn(env)
+  const before = env.offscreenCalls.length
+
+  await env.toSw({
+    type: 'li:pipeline-event',
+    to: 'sw',
+    event: 'bridge-lost',
+    directionId: 'downlink',
+    payload: { category: 'device_missing', message: '耳机没了。' },
+  })
+
+  const after = env.offscreenCalls.slice(before).map((m) => m.type)
+  assert.ok(after.includes('li:stop'), `桥失败必须发 li:stop 让离屏撤翻译层，实际：${after}`)
+  assert.ok(!after.includes('li:disconnect'), '桥失败要保留离屏文档以监听 devicechange，不得发 li:disconnect')
+  assert.equal(env.hasDocument(), true)
+  assert.equal(env.runtime().bridge, 'failed')
+})
+
+test('AC-140 关离屏文档掉 keepalive 端口不得被误判成桥丢失：全程零通知', async () => {
+  const env = createEnv()
+  await loadBackground(env)
+  await powerOn(env)
+  await env.connectKeepalive()
+  env.notifications.length = 0
+
+  // 真实 Chrome 里 closeDocument 必然掉 keepalive 端口；这里让它同步掉，
+  // 把「onDisconnect 先跑、dispatch(disconnected) 后跑」这条最坏次序钉死
+  env.chrome.offscreen.closeDocument = async () => {
+    env.setDocument(false)
+    await env.keepalivePort.drop()
+  }
+
+  const result = await env.toSw({ type: 'li:disconnect', to: 'sw' })
+  assert.deepEqual(result, { ok: true })
+  assert.deepEqual(env.notifications, [], `断开会议音频全程不得发通知，实际：${JSON.stringify(env.notifications)}`)
+  const runtime = env.runtime()
+  assert.equal(runtime.bridge, 'disconnected', '终态必须是 disconnected 而不是 failed')
+  assert.equal(runtime.bridgeError, null, '不得落盘 bridgeFailed 的错误')
+  assert.equal(runtime.phase, 'off')
+  assert.deepEqual(env.lastBadge(), { text: '' }, '角标必须清空，不得闪 !')
 })
 
 test('AC-109 改语言：只重启受影响方向并更新 runtime.languages', async () => {

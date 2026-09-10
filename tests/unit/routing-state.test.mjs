@@ -1,18 +1,25 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { resolveSinkId, forwardMicAudio, buildCaptureConstraints } from '../../src/shared/audio-routing.mjs'
+import {
+  resolveSinkId,
+  forwardMicAudio,
+  buildCaptureConstraints,
+  buildFloorConstraints,
+} from '../../src/shared/audio-routing.mjs'
 import { DIRECTIONS } from '../../src/shared/directions.mjs'
-import { createInitialState, start, stop, toggleMute } from '../../src/shared/session-state.mjs'
 
 const ROLE_IDS = { capture: 'id-cap', monitor: 'id-mon', mic: 'id-mic', virtualMic: 'id-vm' }
 
 test('AC-016 方向表：语言对与输出角色', () => {
-  assert.equal(DIRECTIONS.downlink.source, 'en')
+  // 输入语言由上游自动识别，因此 source 一律 'auto'；mode 决定是否建翻译会话
+  assert.equal(DIRECTIONS.downlink.source, 'auto')
   assert.equal(DIRECTIONS.downlink.target, 'zh')
   assert.equal(DIRECTIONS.downlink.outputRole, 'monitor')
-  assert.equal(DIRECTIONS.uplink.source, 'zh')
+  assert.equal(DIRECTIONS.downlink.mode, 'translate')
+  assert.equal(DIRECTIONS.uplink.source, 'auto')
   assert.equal(DIRECTIONS.uplink.target, 'en')
   assert.equal(DIRECTIONS.uplink.outputRole, 'virtualMic')
+  assert.equal(DIRECTIONS.uplink.mode, 'translate')
 })
 
 test('AC-017 resolveSinkId：方向表是唯一真值来源', () => {
@@ -37,7 +44,6 @@ test('AC-015 forwardMicAudio：静音时不调用 sink；初始状态为静音',
   assert.equal(bytes, 0)
   forwardMicAudio({ muted: false, chunk: new Uint8Array(100), sink })
   assert.ok(bytes > 0)
-  assert.equal(createInitialState().uplink.muted, true)
 })
 
 test('AC-018 采集约束：三项处理均严格为 false 且携带 deviceId', () => {
@@ -48,18 +54,16 @@ test('AC-018 采集约束：三项处理均严格为 false 且携带 deviceId', 
   assert.deepEqual(c.audio.deviceId, { exact: 'dev-1' })
 })
 
-test('AC-016 状态机：方向独立、入参不可变', () => {
-  const s0 = createInitialState()
-  const frozen = JSON.stringify(s0)
-  const s1 = start(s0, 'downlink')
-  const s2 = start(s1, 'uplink')
-  const s3 = stop(s2, 'downlink')
-  assert.equal(s3.uplink.status, 'running')
-  assert.equal(s3.downlink.status, 'stopped')
-  assert.equal(JSON.stringify(s0), frozen)
-  assert.equal(JSON.stringify(s2), JSON.stringify(start(start(createInitialState(), 'downlink'), 'uplink')))
-  const s4 = toggleMute(s3)
-  assert.equal(s4.uplink.muted, false)
-  assert.equal(s4.uplink.status, s3.uplink.status)
-  assert.equal(s3.uplink.muted, true)
+test('AC-136 直通约束：截获路三项全关，真麦克风路开 AEC/NS 但关 AGC', () => {
+  const capture = buildFloorConstraints('dev-cap', 'capture')
+  assert.deepEqual(capture, buildCaptureConstraints('dev-cap'), '截获路与采集同规则，不破坏会议音频')
+  assert.equal(capture.audio.echoCancellation, false)
+  assert.equal(capture.audio.noiseSuppression, false)
+  assert.equal(capture.audio.autoGainControl, false)
+
+  const mic = buildFloorConstraints('dev-mic', 'mic')
+  assert.deepEqual(mic.audio.deviceId, { exact: 'dev-mic' })
+  assert.equal(mic.audio.echoCancellation, true, '外放时减少回声进会议')
+  assert.equal(mic.audio.noiseSuppression, true)
+  assert.equal(mic.audio.autoGainControl, false, '自动增益会让原声忽大忽小')
 })

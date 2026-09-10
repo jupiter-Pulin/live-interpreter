@@ -20,7 +20,15 @@ function base64ToBytes(b64) {
   return bytes
 }
 
-export function createSession({ WebSocketCtor, url, protocols, audioSink, directionId, idleCommitMs = 1200 }) {
+export function createSession({
+  WebSocketCtor,
+  url,
+  protocols,
+  audioSink,
+  directionId,
+  idleCommitMs = 1200,
+  directionTable = DIRECTIONS,
+}) {
   const handlers = new Map()
   let state = 'idle'
   let closedByClient = false
@@ -62,7 +70,7 @@ export function createSession({ WebSocketCtor, url, protocols, audioSink, direct
     ws.send(
       JSON.stringify({
         type: 'session.update',
-        session: { audio: { output: { language: DIRECTIONS[directionId].target } } },
+        session: { audio: { output: { language: directionTable[directionId].target } } },
       })
     )
     // 就绪前排队的音频按原顺序补发

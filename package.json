@@ -10,8 +10,9 @@
   "scripts": {
     "pretest": "node tools/pretest.mjs",
     "test": "node --test \"tests/**/*.test.mjs\"",
-    "start": "node src/server/index.mjs",
-    "start:real": "node --env-file=.env src/server/index.mjs",
+    "build:ext": "node tools/build-extension.mjs --out dist/extension",
+    "install:host": "node tools/install-native-host.mjs",
+    "gen:icons": "node tools/gen-icons.mjs",
     "e2e:real": "node --env-file=.env tools/e2e-real.mjs"
   },
   "dependencies": {

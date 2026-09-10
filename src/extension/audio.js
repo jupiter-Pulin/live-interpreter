@@ -1,5 +1,13 @@
 import { buildCaptureConstraints } from '/shared/audio-routing.mjs'
 import { needsPermissionProbe } from '/shared/permission-probe.mjs'
+import {
+  FLOOR_LEVELS,
+  FLOOR_ATTACK_MS,
+  FLOOR_RELEASE_MS,
+  FLOOR_RECOVER_MS,
+  floorTarget,
+  isTranslating,
+} from '/shared/floor.mjs'
 
 // 浏览器音频接线：采集为 24kHz PCM16 块；播放端按 sinkId 定向输出。
 // 判定逻辑一律在 src/shared/，此处只碰真实浏览器 API。
@@ -37,7 +45,7 @@ export async function startCapture(deviceId, onChunk) {
   }
 }
 
-export async function createPlayer(sinkId, { onPlaybackError } = {}) {
+export async function createPlayer(sinkId, { onPlaybackError, floorLevel = FLOOR_LEVELS[1] } = {}) {
   // 不强制构造采样率：交由浏览器按设备实际输出率重采样，避免部分蓝牙耳机在非常规采样率下无声
   const ctx = new AudioContext()
   if (typeof ctx.setSinkId === 'function' && sinkId) {
@@ -58,6 +66,47 @@ export async function createPlayer(sinkId, { onPlaybackError } = {}) {
     }
   })
   let playhead = 0
+  // 队列里是否有过译文。playhead 的释放窗口判定要跟 ctx.currentTime 比，而上下文创建后的
+  // 头 FLOOR_RELEASE_MS 里 currentTime 本身就小于 0.7——此时归零的 playhead 会让
+  // isTranslating 误判「正在播译文」，把刚建好的直通（attachFloor）和刚清空的队列（flush）
+  // 无故压低。这面旗子只表达「队列空了」，不参与任何增益计算。
+  let queued = false
+  // 直通（音频桥）：输入设备 → floorGain → 已 setSinkId 的 destination。
+  // 译文通过同一个 destination 混入；衬底只动 floorGain，绝不断开直通路。
+  const floorGain = ctx.createGain()
+  floorGain.gain.value = 1
+  floorGain.connect(ctx.destination)
+  let floorTracks = []
+  let level = floorLevel
+  let holdFull = false
+  const scheduled = new Set()
+  let recoverTimer = null
+
+  // 目标增益只由 shared 的 floorTarget/isTranslating 决定，此处只负责平滑过渡
+  function scheduleFloor() {
+    const now = ctx.currentTime
+    const translating = queued && isTranslating({ now, playhead, releaseMs: FLOOR_RELEASE_MS })
+    const target = floorTarget({ translating, holdFull, level })
+    const gain = floorGain.gain
+    const current = gain.value
+    const ms = target < current ? FLOOR_ATTACK_MS : FLOOR_RECOVER_MS
+    gain.cancelScheduledValues(now)
+    gain.setValueAtTime(current, now)
+    gain.linearRampToValueAtTime(target, now + ms / 1000)
+    if (recoverTimer !== null) {
+      clearTimeout(recoverTimer)
+      recoverTimer = null
+    }
+    // 队列播完后再跑一次，把增益抬回 1.0（每次 enqueue 都会重置这个定时器）
+    const remainingMs = (playhead + FLOOR_RELEASE_MS / 1000 - now) * 1000
+    if (translating && remainingMs > 0) {
+      recoverTimer = setTimeout(() => {
+        recoverTimer = null
+        scheduleFloor()
+      }, remainingMs + 20)
+    }
+  }
+
   return {
     enqueue(bytes) {
       try {
@@ -75,12 +124,51 @@ export async function createPlayer(sinkId, { onPlaybackError } = {}) {
         const startAt = Math.max(ctx.currentTime, playhead)
         src.start(startAt)
         playhead = startAt + buffer.duration
+        queued = true
+        scheduled.add(src)
+        src.onended = () => scheduled.delete(src)
+        scheduleFloor()
       } catch (err) {
         onPlaybackError?.(err)
       }
     },
+    // 上行暂停/撤翻译层时丢弃已排队的译文：立即停声并把衬底抬回 1.0
+    flush() {
+      for (const src of scheduled) {
+        try {
+          src.stop()
+        } catch {
+          // 尚未 start 或已结束的源忽略
+        }
+      }
+      scheduled.clear()
+      playhead = 0
+      queued = false
+      scheduleFloor()
+    },
+    attachFloor(stream) {
+      try {
+        const input = ctx.createMediaStreamSource(stream)
+        input.connect(floorGain)
+        floorTracks = stream.getTracks()
+        scheduleFloor()
+      } catch (err) {
+        onPlaybackError?.(err)
+      }
+    },
+    setFloorLevel(next) {
+      level = next
+      scheduleFloor()
+    },
+    holdFloorFull(on) {
+      holdFull = on
+      scheduleFloor()
+    },
     stop() {
       closedByUs = true
+      if (recoverTimer !== null) clearTimeout(recoverTimer)
+      for (const track of floorTracks) track.stop()
+      floorTracks = []
       ctx.close()
     },
   }

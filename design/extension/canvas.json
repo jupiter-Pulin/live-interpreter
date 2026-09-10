@@ -1,0 +1,50 @@
+{
+  "artboards": [
+    {
+      "file": "Main.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 380,
+      "h": 600,
+      "title": "弹窗 · 可点击",
+      "is_interactive": true,
+      "expand": "fill"
+    },
+    {
+      "file": "Docked.dc.html",
+      "x": 480,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "会议中 · 停靠成侧栏（可点击）",
+      "is_interactive": true,
+      "expand": "fit"
+    }
+  ],
+  "annotations": [
+    {
+      "id": "how-to-click",
+      "x": 0,
+      "y": -190,
+      "w": 380,
+      "text": "可点：「开启同传」开/关；两个语言框下拉可选。\n画板上方的 tweak：theme 切深浅色；deviceMissing 打开后再点开启，能看到设备缺失的失败态。"
+    },
+    {
+      "id": "docked-note",
+      "x": 480,
+      "y": -150,
+      "w": 460,
+      "text": "点工具栏图标后以侧栏停靠在会议右侧，和弹窗是同一套内容、按宽高自适应。这块同样可点。"
+    },
+    {
+      "id": "product-note",
+      "x": 0,
+      "y": 720,
+      "w": 380,
+      "text": "开启 = 后台拉起本地 node 翻译进程，关闭即结束。\n对方听到的语言这版没有入口，按现有代码仍是英语；要可选就加第三个下拉。\n音频路由（BlackHole）不进面板，放扩展的选项页。"
+    }
+  ],
+  "launch": {
+    "view": "canvas"
+  }
+}

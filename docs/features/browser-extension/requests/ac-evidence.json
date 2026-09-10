@@ -144,12 +144,16 @@
         {
           "type": "test",
           "ref": "`AC-110 passthrough 方向的分支只看 plan 的 mode`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-110 passthrough 方向：不建会话、不采集、直通恒为 1.0`（tests/integration/offscreen-flow.test.mjs）"
         }
       ],
       "files": [
         "offscreen.js"
       ],
-      "notes": "automated-pass（听感 manual-pending）；静态证明 mode 判定在建会话与采集之前；16ch 只录到原声留手测 7"
+      "notes": "automated-pass（听感 manual-pending）；静态证明 mode 判定在建会话与采集之前；16ch 只录到原声留手测 7；Review round 1 补运行时证明：uplink 选「原声」时不建 WebSocket、不起采集上下文、该方向直通增益恒为 1.0"
     },
     {
       "id": "AC-111",
@@ -437,13 +441,13 @@
       "proof": [
         {
           "type": "test",
-          "ref": "`meeting-mute.test.mjs` 4 条"
+          "ref": "`meeting-mute.test.mjs` 5 条（含 `AC-130 图标连字整表优先于 aria 兜底：参会者磁贴不得抢答真麦克风按钮`）"
         }
       ],
       "files": [
         "src/shared/meeting-mute.mjs"
       ],
-      "notes": "automated-pass；含摄像头按钮不被误判、`microphone-wrapper` 不命中、aria-label 兜底"
+      "notes": "automated-pass；含摄像头按钮不被误判、`microphone-wrapper` 不命中、aria-label 兜底。Review round 1：aria 兜底原为「逐按钮、首个命中即返回」，参会者行/磁贴会抢答导致远端有人静音就暂停我们的上行；改为两趟（图标连字整表优先，全不命中才用 aria），新增用例已定点变异验证。选择器本身（`data-is-muted` 与 `mic`/`mic_off` 连字）仍是未在真实会议页验证的假设——manual-pending。"
     },
     {
       "id": "AC-131",
@@ -451,15 +455,32 @@
       "proof": [
         {
           "type": "test",
-          "ref": "`AC-131/AC-132 Meet 静音…`、`AC-131/AC-132 上行暂停：SW 只转发…`、`AC-120/AC-131 meetingMute…`"
+          "ref": "`AC-131/AC-132 Meet 静音：暂停上行、角标转琥珀；取消静音按需重建`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-131/AC-144 没有 tabs 权限时 sender.tab.url 被裁掉，靠 sender.url 仍认得 Meet 上报`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-131 li:set-uplink-paused：只掐上行，下行对象引用与数据流不受影响`（tests/integration/offscreen-flow.test.mjs）"
+        },
+        {
+          "type": "static",
+          "ref": "`AC-131/AC-132 上行暂停：SW 只转发，离屏只经 forwardMicAudio 门控`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-120/AC-131 meetingMute…`（runtime-state 转换）"
         }
       ],
       "files": [
-        "background.js",
-        "offscreen.js",
-        "audio.js"
+        "src/extension/background.js",
+        "src/extension/offscreen.js",
+        "src/extension/audio.js",
+        "src/shared/meeting-mute.mjs"
       ],
-      "notes": "automated-pass（听感与时延 manual-pending）；自动化覆盖 meetingMuted、琥珀角标、`li:set-uplink-paused`、两处 `forwardMicAudio` 门控、`flush` + `holdFloorFull`；QuickTime 录 16ch 的 0.5 s 内消失留手测 5"
+      "notes": "automated-pass（听感与 0.5 s 时延 manual-pending）。Review round 1 修了 blocker：首轮 SW 侧只看 `sender.tab?.url`，而本扩展无 tabs 权限、无 meet host permission，真实 Chrome 会裁掉该字段，整条静音路径在实机上失效；现改为 `sender.url` 兜底并有针对性用例。离屏侧首轮只有静态断言，现补运行时证明：暂停后 `session.sendAudio` 与 `player.enqueue` 都不再被调用、已排队译文被 `flush` 停掉、上行直通增益为 1.0、下行 player 引用与译文入队不受影响。QuickTime 录 BlackHole 16ch 的「0.5 s 内译文消失、我的原声连续」仍未执行（手测 5）。"
     },
     {
       "id": "AC-132",
@@ -467,14 +488,30 @@
       "proof": [
         {
           "type": "test",
-          "ref": "`AC-131/AC-132 Meet 静音…`、`AC-132/AC-144 非 Meet 来源忽略…`、`AC-133 上行挂起…`、`AC-105/AC-132 改语言时重建失败…`"
+          "ref": "`AC-131/AC-132 Meet 静音：暂停上行、角标转琥珀；取消静音按需重建`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-132/AC-144 非 Meet 来源忽略；phase=off 时只记静音态；标签关闭后回落`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-132/AC-143 取消静音的重建也能被作废：迟到的 open 不得占走麦克风`（tests/integration/offscreen-flow.test.mjs）"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-105/AC-132 改语言时重建失败：翻译层 failed + 通知，桥保持`"
+        },
+        {
+          "type": "static",
+          "ref": "`AC-133 上行挂起：暂停期间被对端关闭只报 uplink-suspended 并置空以便重建`"
         }
       ],
       "files": [
         "background.js",
         "offscreen.js"
       ],
-      "notes": "automated-pass（听感 manual-pending）；自动化覆盖重建 `restarted:['uplink']`、`phase=off` 时不发消息、开启时 `uplinkPaused` 等于静音态、就绪通知的静音文案、静音态未知不暂停；Zoom 场景留手测 13"
+      "notes": "automated-pass（听感 manual-pending）。覆盖重建 `restarted:[\"uplink\"]`、`phase=off` 时不发离屏消息、开启时 `uplinkPaused` 等于静音态、就绪通知的静音文案、静音态未知不暂停。Review round 1 补离屏侧运行时用例：挂起→取消静音确实重建上行会话，且重建途中被 `li:stop` 作废时不会占走麦克风（major 2）。Zoom 等非 Meet 平台的实机场景仍未执行（手测 13）。"
     },
     {
       "id": "AC-133",
@@ -483,13 +520,17 @@
         {
           "type": "test",
           "ref": "`AC-133 createPlayer 返回对象恰含…`、`AC-133 flush…`、`AC-133 stop 同时停止直通 track…`、`AC-133 上行挂起…`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-133 直通 track 被系统结束 → 上报 bridge-lost；devicechange 只上报不自作主张`（tests/integration/offscreen-flow.test.mjs）"
         }
       ],
       "files": [
         "src/extension/audio.js",
         "offscreen.js"
       ],
-      "notes": "automated-pass；返回键集合 deepEqual 六个方法；`player-static.test.mjs` 原有断言未改一字"
+      "notes": "automated-pass；返回键集合 deepEqual 六个方法；`player-static.test.mjs` 原有断言未改一字；Review round 1 的 minor 10（衬底在上下文时钟头 0.7 s 误判「正在播译文」）按 spec Implementation Notes 与本 AC 的静态检查保留 `playhead = 0`，改为新增「队列里有过译文」的内部旗子参与判定，`player-static.test.mjs` 的既有断言未改一字"
     },
     {
       "id": "AC-134",
@@ -527,6 +568,18 @@
         {
           "type": "test",
           "ref": "`AC-136 直通约束…`、`AC-136/AC-119 离屏的直通约束…`、`AC-136 UI 层不得存在「只建桥不翻译」的入口`、`AC-142/AC-101/AC-143 冷启动…`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-136 li:connect：两方向各一条直通路，约束分角色，输出已 setSinkId`（tests/integration/offscreen-flow.test.mjs）"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-136 li:connect 幂等：连发两次不得叠出第二套 AudioContext 与直通 stream`（tests/integration/offscreen-flow.test.mjs）"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-136 createPlayer 失败：已拿到的直通 stream 必须释放，错误按媒体名归类`（tests/integration/offscreen-flow.test.mjs）"
         }
       ],
       "files": [
@@ -535,7 +588,7 @@
         "panel.js",
         "options.js"
       ],
-      "notes": "automated-pass（实机 manual-pending）；自动化覆盖两种约束、离屏只有一处 `getUserMedia`、UI 无 `li:connect`、建桥完成前未 `connectNative`；「直通延迟 < 50 ms」「耳机听到原声」留手测 1/12 与上游验证项"
+      "notes": "automated-pass（实机 manual-pending）；自动化覆盖两种约束、离屏只有一处 `getUserMedia`、UI 无 `li:connect`、建桥完成前未 `connectNative`；「直通延迟 < 50 ms」「耳机听到原声」留手测 1/12 与上游验证项；Review round 1 补离屏侧运行时证明：两方向各一条 `MediaStreamSource → floorGain(1.0) → 已 setSinkId 的 destination`、约束分别来自 `buildFloorConstraints(id,\"capture\"/\"mic\")`、建桥阶段不起采集、`li:connect` 幂等（major 3）、createPlayer 失败时释放已获取的 stream（minor 7）。直通延迟与听感仍 manual-pending"
     },
     {
       "id": "AC-137",
@@ -544,13 +597,17 @@
         {
           "type": "test",
           "ref": "`floor.test.mjs` 3 条、`AC-137 衬底增益：ramp 平滑…`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-137 衬底不得在上下文时钟头 0.7 s 里误判「正在播译文」`（tests/integration/offscreen-flow.test.mjs）"
         }
       ],
       "files": [
         "src/shared/floor.mjs",
         "audio.js"
       ],
-      "notes": "automated-pass（听感 manual-pending）；纯函数逐项验证；静态确认用 `linearRampToValueAtTime` 且目标值只来自 `floorTarget`/`isTranslating`；实际压低/恢复听感留手测 4"
+      "notes": "automated-pass（听感 manual-pending）；纯函数逐项验证；静态确认用 `linearRampToValueAtTime` 且目标值只来自 `floorTarget`/`isTranslating`；实际压低/恢复听感留手测 4；Review round 1 补运行时用例：`attachFloor` 之后增益为 1、喂译文后压低、`flush` 后立即回 1.0，覆盖首轮漏掉的「上下文时钟头 0.7 s」窗口（minor 10）"
     },
     {
       "id": "AC-138",
@@ -588,14 +645,22 @@
       "proof": [
         {
           "type": "test",
-          "ref": "`AC-140 断开会议音频…`"
+          "ref": "`AC-140 断开会议音频：先撤翻译层再撤桥，runtime 回初始，角标清空`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-140 关离屏文档掉 keepalive 端口不得被误判成桥丢失：全程零通知`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-140 li:disconnect：撤翻译层后停全部播放器与直通 track`（tests/integration/offscreen-flow.test.mjs）"
         }
       ],
       "files": [
         "background.js",
         "offscreen.js"
       ],
-      "notes": "automated-pass（实机 manual-pending）；自动化覆盖先撤翻译层再撤桥、closeDocument、runtime 回初始并保留 meetingMuted、角标清空；track `readyState === 'ended'` 留手测 12"
+      "notes": "automated-pass（实机 manual-pending）。Review round 1 修了 major：`disconnectAll` 先 `closeDocument()` 再 `dispatch(disconnected)`，而关文档必然掉 keepalive 端口，其 `onDisconnect` 会把「断开会议音频」误报成桥失败（落盘 bridgeFailed、角标闪 `!`、弹 li-failed 通知）；加 `closingOffscreen` 覆盖整个关闭窗口，新增用例用同步掉端口的最坏次序验证全程零通知。离屏侧新增用例断言 player 全关、会话全关、直通 track 全部 `readyState === \"ended\"`——此前这一条只能靠手测 12。macOS 橙色指示消失与面板观感仍未执行（手测 12）。"
     },
     {
       "id": "AC-141",
@@ -603,13 +668,35 @@
       "proof": [
         {
           "type": "test",
-          "ref": "`AC-141 桥丢失…`、`AC-141 devicechange 不循环…`、`AC-138/AC-141 failureCopy…`"
+          "ref": "`AC-141 桥丢失：撤宿主 + 通知；device_missing 时 devicechange 自动重试一次`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-141 devicechange 不循环：桥仍失败时不再连续重试`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-141 桥失败必须通知离屏收尾翻译层，否则会话与采集留着跑`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-141/AC-105 classifyMediaError：媒体 DOMException 先按名字归类，别被压成 api_error`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-133 直通 track 被系统结束 → 上报 bridge-lost；devicechange 只上报不自作主张`（tests/integration/offscreen-flow.test.mjs）"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-138/AC-141 failureCopy…`（通知正文）"
         }
       ],
       "files": [
-        "background.js"
+        "src/extension/background.js",
+        "src/extension/offscreen.js",
+        "src/shared/errors.mjs"
       ],
-      "notes": "automated-pass（实机 manual-pending）；自动化覆盖桥失败通知、宿主退出、离屏保留、重试恰一次、连发 5 次 devicechange 不循环；拔插耳机留手测 11"
+      "notes": "automated-pass（拔插耳机 manual-pending）。Review round 1 补两处：桥失败必须发 `li:stop` 让离屏收尾（否则 AudioContext/直通 stream/会话/采集全留着跑，每次拔插再叠一套，major 3）；`classifyMediaError` 让 getUserMedia/setSinkId 的 DOMException 不再被压成 `api_error`——否则通知文案自相矛盾，且只有 `device_missing` 才触发的 devicechange 一次重试永远不会发生（minor 8）。真实拔插耳机的自动恢复仍未执行（手测 11）。"
     },
     {
       "id": "AC-142",
@@ -633,30 +720,62 @@
       "proof": [
         {
           "type": "test",
-          "ref": "`AC-142/AC-101/AC-143 冷启动…`、`AC-143 readyCopy…`、`AC-132/AC-144 …就绪通知静音文案`"
+          "ref": "`AC-143 li:start：每个 translate 方向都 open 且 startCapture 返回后才回 ok`（tests/integration/offscreen-flow.test.mjs）"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-143 在途启动可作废：等 open 期间收到 li:stop 后会话与采集都不得留下`（tests/integration/offscreen-flow.test.mjs）"
+        },
+        {
+          "type": "static",
+          "ref": "`AC-143 就绪判定：startDirection 必须先等 open 再 startCapture，且在途启动可作废`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-142/AC-101/AC-143 冷启动：三步 startStep 序列 → 进行中 + 就绪通知`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-143 readyCopy…`（三种形态逐字比对）"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-132/AC-144 …就绪通知静音文案`"
         }
       ],
       "files": [
-        "offscreen.js",
-        "runtime-state.mjs",
-        "background.js"
+        "src/extension/offscreen.js",
+        "src/shared/runtime-state.mjs",
+        "src/extension/background.js"
       ],
-      "notes": "automated-pass（通知显示 manual-pending）；readyCopy 三种形态逐字比对；就绪判定「等 open + 采集返回」由 `offscreen.js` 的 `startDirection` 实现，Node 里无法执行（无 Web Audio），该半段留手测 4"
+      "notes": "automated-pass（macOS 通知显示 manual-pending）。首轮「等每个方向 open 且 startCapture 返回后才回 ok」只有手测承诺（声称 Node 里无 Web Audio 无法执行）；Review round 1 用假 Web Audio + 可控 open 的假 WebSocket 补齐了运行时证明：open 之前不得 startCapture、只有一个方向就绪时不得回 ok、两方向都 open 后才回 running，并加静态守卫。另修 major 2：在途启动现在可被 `li:stop`/`li:disconnect` 作废，不会在 SW 早已 error 之后继续采集送音。macOS 通知中心的实际显示与正文一致性仍未执行（手测 4）。"
     },
     {
       "id": "AC-144",
       "status": "pass",
       "proof": [
         {
+          "type": "static",
+          "ref": "`AC-144 Meet 探测脚本只读：不写 DOM、不联网、不碰媒体、不监听输入`（17 个禁用 API + 上报必须接住 Promise）"
+        },
+        {
+          "type": "static",
+          "ref": "`AC-144/AC-119 静音判定只经 parseMeetMuteState，且只信任 Meet 标签的上报`"
+        },
+        {
           "type": "test",
-          "ref": "`AC-144 Meet 探测脚本只读…`、`AC-144/AC-119 静音判定…`"
+          "ref": "`AC-131/AC-144 没有 tabs 权限时 sender.tab.url 被裁掉，靠 sender.url 仍认得 Meet 上报`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-132/AC-144 非 Meet 来源忽略；phase=off 时只记静音态；标签关闭后回落`"
         }
       ],
       "files": [
         "meet-mute.js",
         "background.js"
       ],
-      "notes": "automated-pass；17 个禁用 API 逐个扫；SW 侧 `sender.tab?.url?.startsWith(MEET_ORIGIN)` 校验有静态与运行时两重证明"
+      "notes": "automated-pass。17 个禁用 API 逐个扫；探测脚本自身不含任何判定。来源校验的口径已纠正：首轮日志把「运行时证明」记在 `sender.tab.url` 上，而那份运行时证明用的是手写的假 sender，真实 Chrome 在无 tabs 权限、无 meet host permission 时会把该字段裁掉——即假 sender 与实机形态不一致。Review round 1 起校验为 `sender.tab?.url` 与 `sender.url` 双判（并要求 `sender.tab.id` 存在），新增用例专门喂「tab.url 被裁掉、只剩 tab.id 与 url」「同形态但来自 zoom.us」「连 tab.id 都没有」三种 sender。真实 Meet 页面上探测脚本是否真能读到按钮仍未验证（手测 4/5，风险 1）。"
     },
     {
       "id": "AC-145",
@@ -680,7 +799,7 @@
         "command": "npm test",
         "status": "passed",
         "exitCode": 0,
-        "artifact": "tests 152 / pass 152 / fail 0"
+        "artifact": "tests 170 / pass 170 / fail 0（Review round 1 修复后；首轮为 152/152）"
       },
       {
         "command": "npm run build:ext",
@@ -699,6 +818,29 @@
         "status": "not-run",
         "exitCode": null,
         "artifact": "会产生真实 API 费用，按任务要求未执行"
+      }
+    ],
+    "reviewRounds": [
+      {
+        "round": 1,
+        "verdict": "blocked",
+        "findings": {
+          "blocker": 1,
+          "major": 4,
+          "minor": 5
+        },
+        "commits": [
+          "dbc09d3",
+          "90c2b6a",
+          "8c5c6d3"
+        ],
+        "allAddressed": true,
+        "deviations": [
+          "minor 10（flush 后 playhead 归零导致 isTranslating 误判）未按 reviewer 建议改 playhead：spec Implementation Notes 的「衬底」一行与 AC-133 的静态检查都明文要求 `playhead = 0`，且 `player-static.test.mjs`（spec Compatibility 清单内的遗留文件）已据此断言。改为新增「队列里有过译文」的内部旗子参与 translating 判定，修掉同一个缺陷（并连带覆盖 attachFloor 场景）而不违反 spec、不改任何既有断言；AC-137 的释放窗口语义一字未变。"
+        ],
+        "newTests": 18,
+        "mutationVerified": true,
+        "notes": "全部 10 项已修，每项都做了定点变异验证（回退修法后有且仅有对应用例转红）。新增 tests/integration/offscreen-flow.test.mjs（11 条），填补 reviewer 点名的离屏侧零覆盖缺口；该文件用假 Web Audio / 假 mediaDevices / 假 WebSocket，只证明接线与生命周期，不证明真实设备行为。"
       }
     ]
   },

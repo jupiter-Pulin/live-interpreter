@@ -28,7 +28,8 @@
 | 3 | `925a4c2` | 工具链：manifest 与固定 key、`build:ext`、`install:host`、扩展 ID、图标 |
 | 4 | `d1337e0` | SW 编排、离屏音频桥与翻译叠加、Meet 只读探测；静态纪律 + SW 全流程集成测试 |
 | 5 | `9aecbac` | 弹窗/侧栏面板与选项页 |
-| 6 | 本次 | README「浏览器插件」章节、请求日志、AC-103 静态用例 |
+| 6 | `d0c7d52` + `0f5c10c` | README「浏览器插件」章节、请求日志、AC-103 静态用例；改语言重建失败按翻译层 failed 处理 |
+| review r1 | `dbc09d3`、`90c2b6a`、`8c5c6d3`、本次 | reviewer 的 1 blocker + 4 major + 5 minor 修复、离屏侧集成测试、日志与证据更新（见「Review round 1 修复」）|
 
 ## Changes
 
@@ -54,7 +55,9 @@
 npm test
 ```
 
-结果：**152 passed / 0 failed / 0 skipped**（`# tests 152 # pass 152 # fail 0`，耗时约 2.6 s，mock 后端，不打真 API、不碰真设备）。
+结果（首轮实现）：**152 passed / 0 failed / 0 skipped**（耗时约 2.6 s，mock 后端，不打真 API、不碰真设备）。
+
+结果（Review round 1 修复后）：**170 passed / 0 failed / 0 skipped**（`# tests 170 # pass 170 # fail 0`，耗时约 2.5 s）。新增 18 条用例，既有断言一字未改。
 
 ```bash
 npm run build:ext     # → dist/extension（18 个 shared 模块 + 扩展本体 + 4 个图标）
@@ -91,7 +94,7 @@ node tools/gen-icons.mjs     # 已运行一次，4 个尺寸的 PNG 已提交
 | AC-107 | pass | `AC-107 默认计划即方向表…`、`AC-107 两个目标语言…` | automated-pass | `src/shared/direction-plan.mjs`、`directions.mjs` | 含「不与 DIRECTIONS 共享引用」 |
 | AC-108 | pass | `AC-108 选「原声」…`、`AC-108 normalizeSettings…`、`AC-108/AC-109 diffPlan…` | automated-pass | `direction-plan.mjs` | 未知键 `speak`/`autoConnect` 被丢弃且不抛出 |
 | AC-109 | pass | `AC-109 改语言：只重启受影响方向…`、`AC-109 planApplied…` | automated-pass（听感 manual-pending） | `background.js`、`offscreen.js` | 自动化覆盖 `li:update-plan` 的新计划、`runtime.languages`、未开启时不发消息；「另一方向对象引用不变」「新会话 session.update 的 language」留手测 7（离屏内部行为，Node 里无 Web Audio） |
-| AC-110 | pass | `AC-110 passthrough 方向的分支只看 plan 的 mode` | automated-pass（听感 manual-pending） | `offscreen.js` | 静态证明 mode 判定在建会话与采集之前；16ch 只录到原声留手测 7 |
+| AC-110 | pass | `AC-110 passthrough 方向的分支只看 plan 的 mode`、`AC-110 passthrough 方向：不建会话、不采集、直通恒为 1.0`（离屏侧） | automated-pass（听感 manual-pending） | `offscreen.js` | 静态证明 mode 判定在建会话与采集之前；Review r1 补运行时用例：uplink 选「原声」时不建 WebSocket、不起采集上下文、该方向直通增益恒为 1.0。16ch 只录到原声留手测 7 |
 | AC-111 | pass | `native-protocol.test.mjs` 4 条 | automated-pass | `src/shared/native-protocol.mjs` | 逐字节/半包/粘包三种切分 + 超限停止 + 非法 JSON 停止 |
 | AC-112 | pass | `AC-112 首帧 ready…` | automated-pass | `src/server/native-host.mjs` | 真的 spawn 宿主进程；断言 stdout 字节数恰等于协议帧（无日志污染）、ready 帧喂 `selectSessionEndpoint`、`/` 与 `/api/config` 404 |
 | AC-113 | pass | `AC-113 ping → pong…`、`AC-113 关闭 stdin…` | automated-pass | `native-host.mjs` | 两条路径都在 2 s 内以 0 退出且端口不可再连 |
@@ -112,20 +115,20 @@ node tools/gen-icons.mjs     # 已运行一次，4 个尺寸的 PNG 已提交
 | AC-128 | pass | `AC-128 弹窗 380×600…` | automated-pass（截图 manual-pending） | `panel.css` | 静态覆盖尺寸、浅色 token、danger/warning 色值、脉冲与转圈动画、下拉 280px 滚动、无远程字体；已用一次性预览脚手架在浏览器里核对 on/starting/muted/unknownMute/bridgeFail 五态与选项页渲染（截图未入库），真实弹窗尺寸留手测 14 |
 | AC-129 | pass | `AC-129 选项页…`、`AC-129 衬底档位改动即时下发…` | automated-pass（授权提示 manual-pending） | `options.html`、`options.js`、`background.js` | 自动化覆盖按 kind 过滤、默认分配首项、preflight 结论、三选一写 `floorLevel` 并即时下发、自检后立即断开端口、各段说明文字；真实授权弹窗留手测 2 |
 | AC-130 | pass | `meeting-mute.test.mjs` 4 条 | automated-pass | `src/shared/meeting-mute.mjs` | 含摄像头按钮不被误判、`microphone-wrapper` 不命中、aria-label 兜底 |
-| AC-131 | pass | `AC-131/AC-132 Meet 静音…`、`AC-131/AC-132 上行暂停：SW 只转发…`、`AC-120/AC-131 meetingMute…` | automated-pass（听感与时延 manual-pending） | `background.js`、`offscreen.js`、`audio.js` | 自动化覆盖 meetingMuted、琥珀角标、`li:set-uplink-paused`、两处 `forwardMicAudio` 门控、`flush` + `holdFloorFull`；QuickTime 录 16ch 的 0.5 s 内消失留手测 5 |
-| AC-132 | pass | `AC-131/AC-132 Meet 静音…`、`AC-132/AC-144 非 Meet 来源忽略…`、`AC-133 上行挂起…`、`AC-105/AC-132 改语言时重建失败…` | automated-pass（听感 manual-pending） | `background.js`、`offscreen.js` | 自动化覆盖重建 `restarted:['uplink']`、`phase=off` 时不发消息、开启时 `uplinkPaused` 等于静音态、就绪通知的静音文案、静音态未知不暂停；Zoom 场景留手测 13 |
-| AC-133 | pass | `AC-133 createPlayer 返回对象恰含…`、`AC-133 flush…`、`AC-133 stop 同时停止直通 track…`、`AC-133 上行挂起…` | automated-pass | `src/extension/audio.js`、`offscreen.js` | 返回键集合 deepEqual 六个方法；`player-static.test.mjs` 原有断言未改一字 |
+| AC-131 | pass | `AC-131/AC-132 Meet 静音…`、`AC-131/AC-132 上行暂停：SW 只转发…`、`AC-120/AC-131 meetingMute…`、`AC-131/AC-144 没有 tabs 权限时…`、`AC-131 li:set-uplink-paused：只掐上行…`（离屏侧） | automated-pass（听感与时延 manual-pending） | `background.js`、`offscreen.js`、`audio.js` | Review r1 前 SW 侧只有静态证明 + 假 sender 的运行时证明，而真实 Chrome 会裁掉 `sender.tab.url` 使这条路径整条失效（blocker 1 已修）；现在另有离屏侧运行时用例：暂停后 `session.sendAudio` 与 `player.enqueue` 都不再被调用、已排队的译文被 `flush` 停掉、上行直通增益为 1.0、下行播放器引用与译文入队不受影响。QuickTime 录 16ch 的 0.5 s 内消失仍留手测 5 |
+| AC-132 | pass | `AC-131/AC-132 Meet 静音…`、`AC-132/AC-144 非 Meet 来源忽略…`、`AC-133 上行挂起…`、`AC-105/AC-132 改语言时重建失败…`、`AC-132/AC-143 取消静音的重建也能被作废…`（离屏侧） | automated-pass（听感 manual-pending） | `background.js`、`offscreen.js` | 自动化覆盖重建 `restarted:['uplink']`、`phase=off` 时不发消息、开启时 `uplinkPaused` 等于静音态、就绪通知的静音文案、静音态未知不暂停；Review r1 另补离屏侧运行时用例：挂起→取消静音确实重建上行会话，且重建途中被 `li:stop` 作废时不会占走麦克风。Zoom 场景留手测 13 |
+| AC-133 | pass | `AC-133 createPlayer 返回对象恰含…`、`AC-133 flush…`、`AC-133 stop 同时停止直通 track…`、`AC-133 上行挂起…`、`AC-133 直通 track 被系统结束 → 上报 bridge-lost…`（离屏侧） | automated-pass | `src/extension/audio.js`、`offscreen.js` | 返回键集合 deepEqual 六个方法；`player-static.test.mjs` 原有断言未改一字（Review r1 的 minor 10 正是为了保住其中的 `playhead = 0` 断言才改用「队列有过译文」旗子，见修复第 10 条）；离屏侧补「暂停期间被对端关闭只报 uplink-suspended」与「track 被结束报 bridge-lost」的运行时证明 |
 | AC-134 | pass | `server-routes.test.mjs` 5 条 | automated-pass | `src/server/index.mjs`、`package.json` | 目录/文件已删、`serveStatic`/`/api/config`/`readFile`/`process.env` 均不存在、三个路由 404 JSON、scripts 清单 |
 | AC-135 | pass | `AC-135 语言目录…`、`AC-135 原声是第 14 个选项…`、`AC-135 接线层不含语言码…`、`AC-126/AC-135 两个下拉…` | automated-pass | `src/shared/languages.mjs` | 13 个码作为集合与上游文档一致；五个接线文件逐个扫语言码与标签字面量 |
-| AC-136 | pass | `AC-136 直通约束…`、`AC-136/AC-119 离屏的直通约束…`、`AC-136 UI 层不得存在「只建桥不翻译」的入口`、`AC-142/AC-101/AC-143 冷启动…` | automated-pass（实机 manual-pending） | `src/shared/audio-routing.mjs`、`offscreen.js`、`panel.js`、`options.js` | 自动化覆盖两种约束、离屏只有一处 `getUserMedia`、UI 无 `li:connect`、建桥完成前未 `connectNative`；「直通延迟 < 50 ms」「耳机听到原声」留手测 1/12 与上游验证项 |
-| AC-137 | pass | `floor.test.mjs` 3 条、`AC-137 衬底增益：ramp 平滑…` | automated-pass（听感 manual-pending） | `src/shared/floor.mjs`、`audio.js` | 纯函数逐项验证；静态确认用 `linearRampToValueAtTime` 且目标值只来自 `floorTarget`/`isTranslating`；实际压低/恢复听感留手测 4 |
+| AC-136 | pass | `AC-136 直通约束…`、`AC-136/AC-119 离屏的直通约束…`、`AC-136 UI 层不得存在「只建桥不翻译」的入口`、`AC-142/AC-101/AC-143 冷启动…`、`AC-136 li:connect：两方向各一条直通路…`、`AC-136 li:connect 幂等…`、`AC-136 createPlayer 失败…`（离屏侧） | automated-pass（实机 manual-pending） | `src/shared/audio-routing.mjs`、`offscreen.js`、`panel.js`、`options.js` | 自动化覆盖两种约束、离屏只有一处 `getUserMedia`、UI 无 `li:connect`、建桥完成前未 `connectNative`；Review r1 补离屏侧运行时证明：两方向各一条 `MediaStreamSource → floorGain(1.0) → 已 setSinkId 的 destination`、约束分别来自 `buildFloorConstraints(id,'capture'/'mic')`、建桥阶段不起采集、`li:connect` 幂等、失败时释放 stream。「直通延迟 < 50 ms」「耳机听到原声」仍留手测 1/12 与上游验证项 |
+| AC-137 | pass | `floor.test.mjs` 3 条、`AC-137 衬底增益：ramp 平滑…`、`AC-137 衬底不得在上下文时钟头 0.7 s 里误判「正在播译文」`（离屏侧） | automated-pass（听感 manual-pending） | `src/shared/floor.mjs`、`audio.js` | 纯函数逐项验证；静态确认用 `linearRampToValueAtTime` 且目标值只来自 `floorTarget`/`isTranslating`；Review r1 补运行时用例：`attachFloor` 之后增益为 1、喂译文后压低、`flush`（撤翻译层/暂停）后立即回 1.0——含首轮被漏掉的「上下文时钟头 0.7 s」窗口。实际压低/恢复听感留手测 4 |
 | AC-138 | pass | `AC-105/AC-138 宿主不可用…`、`AC-120/AC-138 桥失败时…`、`AC-138/AC-141 failureCopy…` | automated-pass（音频连续性 manual-pending） | `background.js`、`runtime-state.mjs` | 自动化覆盖 bridge 保持 connected、离屏文档仍在、native 端口已断、通知正文等于 `failureCopy(...)`；「player 与直通 stream 引用不变、增益回 1.0」留手测 9 |
 | AC-139 | pass | `AC-139 浏览器刚启动…`、`AC-122/AC-139 planRecovery…`、`AC-122/AC-139 顶层与钩子…` | automated-pass（实机 manual-pending） | `background.js`、`runtime-state.mjs` | 自动化覆盖顶层与 onInstalled/onStartup 零占用、planRecovery 永不返回 connect/start；macOS 橙色麦克风指示留手测 3 |
-| AC-140 | pass | `AC-140 断开会议音频…` | automated-pass（实机 manual-pending） | `background.js`、`offscreen.js` | 自动化覆盖先撤翻译层再撤桥、closeDocument、runtime 回初始并保留 meetingMuted、角标清空；track `readyState === 'ended'` 留手测 12 |
-| AC-141 | pass | `AC-141 桥丢失…`、`AC-141 devicechange 不循环…`、`AC-138/AC-141 failureCopy…` | automated-pass（实机 manual-pending） | `background.js` | 自动化覆盖桥失败通知、宿主退出、离屏保留、重试恰一次、连发 5 次 devicechange 不循环；拔插耳机留手测 11 |
+| AC-140 | pass | `AC-140 断开会议音频…`、`AC-140 关离屏文档掉 keepalive 端口不得被误判成桥丢失…`、`AC-140 li:disconnect：撤翻译层后停全部播放器与直通 track`（离屏侧） | automated-pass（实机 manual-pending） | `background.js`、`offscreen.js` | 自动化覆盖先撤翻译层再撤桥、closeDocument、runtime 回初始并保留 meetingMuted、角标清空；Review r1 补「关文档掉 keepalive 端口的最坏次序下全程零通知、终态 disconnected」（major 4）与离屏侧「player 全关、会话全关、直通 track 全部 `readyState === 'ended'`」——后者此前只能靠手测 12 |
+| AC-141 | pass | `AC-141 桥丢失…`、`AC-141 devicechange 不循环…`、`AC-138/AC-141 failureCopy…`、`AC-141 桥失败必须通知离屏收尾翻译层…`、`AC-141/AC-105 classifyMediaError…`、`AC-133 直通 track 被系统结束 → 上报 bridge-lost…`（离屏侧） | automated-pass（实机 manual-pending） | `background.js`、`offscreen.js`、`src/shared/errors.mjs` | 自动化覆盖桥失败通知、宿主退出、离屏保留、重试恰一次、连发 5 次 devicechange 不循环；Review r1 补：桥失败必须发 `li:stop` 让离屏收尾（major 3）、媒体 DOMException 按名字归类（否则 `device_missing` 的自动重试永不触发，minor 8）、离屏对 `devicechange` 只上报不自作主张、直通 track 被结束时上报 `bridge-lost`。拔插耳机仍留手测 11 |
 | AC-142 | pass | `AC-142/AC-101/AC-143 冷启动…`、`AC-120/AC-142 requestStart…`、`AC-127/AC-142 statusCopy 三段步骤`、`AC-119/AC-142 没有字段赋值` | automated-pass（视觉 manual-pending） | `background.js`、`runtime-state.mjs`、`panel.js` | 自动化断言发 `li:connect` 时 `startStep==='bridge'`、发 `li:start` 时 `==='translation'`、结束时为 null，且 `background.js` 无 `startStep =` 赋值；转圈观感留手测 4/8 |
-| AC-143 | pass | `AC-142/AC-101/AC-143 冷启动…`、`AC-143 readyCopy…`、`AC-132/AC-144 …就绪通知静音文案` | automated-pass（通知显示 manual-pending） | `offscreen.js`、`runtime-state.mjs`、`background.js` | readyCopy 三种形态逐字比对；就绪判定「等 open + 采集返回」由 `offscreen.js` 的 `startDirection` 实现，Node 里无法执行（无 Web Audio），该半段留手测 4 |
-| AC-144 | pass | `AC-144 Meet 探测脚本只读…`、`AC-144/AC-119 静音判定…` | automated-pass | `meet-mute.js`、`background.js` | 17 个禁用 API 逐个扫；SW 侧 `sender.tab?.url?.startsWith(MEET_ORIGIN)` 校验有静态与运行时两重证明 |
+| AC-143 | pass | `AC-142/AC-101/AC-143 冷启动…`、`AC-143 readyCopy…`、`AC-132/AC-144 …就绪通知静音文案`、`AC-143 li:start：每个 translate 方向都 open 且 startCapture 返回后才回 ok`、`AC-143 在途启动可作废…`、`AC-143 就绪判定…`（静态） | automated-pass（通知显示 manual-pending） | `offscreen.js`、`runtime-state.mjs`、`background.js` | readyCopy 三种形态逐字比对。就绪判定「等 open + 采集返回」首轮只有手测承诺，Review r1 补齐运行时证明：假 Web Audio + 可控 open 的假 WebSocket 下，断言 open 之前不得 startCapture、只有一个方向就绪时不得回 ok、两方向都 open 后才回 `running`，并加静态守卫（等 open 必须排在 `startCapture(` 之前）。macOS 通知实际显示仍留手测 4 |
+| AC-144 | pass | `AC-144 Meet 探测脚本只读…`、`AC-144/AC-119 静音判定…`、`AC-131/AC-144 没有 tabs 权限时 sender.tab.url 被裁掉…` | automated-pass | `meet-mute.js`、`background.js` | 17 个禁用 API 逐个扫 + 上报必须接住 Promise；SW 侧的来源校验现在是 `sender.tab?.url` 与 `sender.url` 双判（见「Review round 1 修复」第 1 条），新增用例专门喂「`tab.url` 被裁掉、只剩 `tab.id` 与 `url`」的 sender 形态 |
 | AC-145 | pass | `AC-145 通知只在三处发出…`、`AC-145 通知契约…`、集成测试里三处通知的 id/title/message 逐条断言 | automated-pass（macOS 显示 manual-pending） | `background.js`、`runtime-state.mjs` | 自动化确认恰好三处 `chrome.notifications.create`、id 与正文来源；macOS 通知中心实际显示留手测 4/9 |
 
 汇总：**45 条 AC 全部有自动化证据（automated-pass）**，其中 20 条另有需要真实设备/浏览器才能确认的部分，已在 Notes 里点名对应的手测项。没有 `not-met` 或 `blocked`。
@@ -216,7 +219,7 @@ node tools/gen-icons.mjs     # 已运行一次，4 个尺寸的 PNG 已提交
 3. **同一麦克风两条 `getUserMedia`**：直通用 `buildFloorConstraints(id,'mic')`（开 AEC/NS），采集用 `buildCaptureConstraints`（全关）。若 Chrome 拒绝并存，第一次「开启同传」会在第三步失败并给出可行动文案，桥仍在。
 4. **13 个语言码**：未逐一实测。个别码若被上游拒绝，表现为该方向建会话失败 → 翻译层 failed + 通知，桥不受影响。
 5. **冷启动耗时**：`connectNative` 到 `ready` 的真实耗时未测（本机直接 spawn 宿主约 5 ms，但 Chrome 拉起 wrapper 的开销未知）。超时上限已设为 10 s。
-6. **`chrome.sidePanel.open()`** 需要用户手势，「停靠」按钮的点击满足这一条，但未在真机验证。
+6. **`chrome.sidePanel.open()`** 需要用户手势。首轮实现在 `await chrome.tabs.query(...)` 之后才调用它——手势到那时已经过期；Review round 1 已改为在点击处理器里**同步**调用 `open({ windowId: chrome.windows.WINDOW_ID_CURRENT })`（见修复第 6 条，有静态守卫）。手势是否被真机接受仍未验证（手测 14）。
 
 ## 给 reviewer 的重点文件
 
@@ -231,6 +234,126 @@ node tools/gen-icons.mjs     # 已运行一次，4 个尺寸的 PNG 已提交
 | `tests/integration/background-flow.test.mjs` | 新增的 SW 全流程验证方式（改写 import 说明符后加载真源码 + 假 chrome API）；请判断这个手法是否可接受 |
 | `tests/unit/extension-static.test.mjs` | 25 条接线纪律，是「判定只在 shared」这条不变量的唯一守卫 |
 
+## Review round 1 修复
+
+独立 reviewer 对 `0654130..0f5c10c` 给出 **Blocked**：1 blocker + 4 major + 5 minor。以下逐条列修法、提交与测试。`npm test`：**152 → 170 通过 / 0 失败**（新增 18 条用例，无既有断言被改动）。
+
+| 提交 | 覆盖 |
+| --- | --- |
+| `dbc09d3` | blocker 1、major 3（SW 半）、major 4 + `background-flow.test.mjs` 3 条 |
+| `90c2b6a` | major 2、minor 7、minor 8、major 3（离屏半）+ 新建 `offscreen-flow.test.mjs` 11 条 + `extension-static` 1 条 + `pure-functions` 1 条 |
+| `8c5c6d3` | major 5、minor 6、minor 9、minor 10 + `meeting-mute` 1 条 +（静态守卫随 `extension-static` 一并在上一条提交）|
+
+### blocker 1 — `li:meeting-mute` 的来源校验让静音路径整条失效
+
+- 病因：`background.js` 只看 `sender.tab?.url?.startsWith(MEET_ORIGIN)`。本扩展没有 `tabs` 权限，也没有 meet 的 host permission（`content_scripts.matches` 不算），Chrome 会把 `sender.tab.url` 裁成 `undefined` → 全部上报被丢弃 → `meetingMuted` 永远 `null` → AC-131/132/143 的静音路径在实机上完全不工作。
+- 修法：`if (!sender.tab?.url?.startsWith(MEET_ORIGIN) && !sender.url?.startsWith(MEET_ORIGIN)) return false`（`sender.url` 与 `sender.tab.id` 都不被裁剪；保留原字面量以满足 AC-144 静态断言），并补 `if (sender.tab?.id === undefined) return false`——按标签记账的前提，顺带避免 `sender.tab.id` 在无 tab 的上报上抛 TypeError。
+- 测试：`AC-131/AC-144 没有 tabs 权限时 sender.tab.url 被裁掉，靠 sender.url 仍认得 Meet 上报`。三种 sender 形态：`{ tab: { id: 7 }, url: meet }` 必须改到 `meetingMuted`（并验证琥珀角标与 `li:set-uplink-paused{paused:true}`）；`{ tab: { id: 9 }, url: 'https://zoom.us/j/1' }` 必须忽略；`{ url: meet }`（无 tab.id）必须忽略且不抛。
+
+### major 2 — `li:stop`/`li:disconnect` 取消不了在途启动
+
+- 病因：`startDirection` 在 `openTranslationSession` → 等 `open` → `startCapture` 三个 await 之后**无条件**写 `live[directionId]`。`li:start` 超时（15 s）或一方向在另一方向启动途中失败后，SW 已 `phase='error'`、宿主已退，离屏却继续采集送音计费、把译文 enqueue 进会议；再次开启还会覆盖 `live[id]` 让旧会话永不 `close`。
+- 修法：模块级 `epoch` + `cancelPendingStarts()`；`stopTranslation()` 与 `disconnectBridge()` 自增；`startDirection` 入口 `const mine = epoch`，**等 open 之后**（别再去占采集设备）与**写 `live` 之前**（`capture.stop()` + `session.close()`）各比一次；`startTranslation` 循环每轮开头与每次 await 之后也比，不一致即 `throw CANCELLED`（被作废的启动不得回 `ok`，否则 SW 会把早已收尾的方向标成 `running`）。
+- 测试（两条路径分别有独立用例，缺任一半都会转红）：
+  - `AC-143 在途启动可作废：等 open 期间收到 li:stop 后会话与采集都不得留下` —— 走 `startTranslation` 的循环检查。
+  - `AC-132/AC-143 取消静音的重建也能被作废：迟到的 open 不得占走麦克风` —— 走 `startDirection` 自己的检查（`setUplinkPaused` 的重建不经 `startTranslation`，只有这两处检查能救）。断言被作废的会话 `close` 了、采集上下文数量没有增加、撤翻译层后没有任何活的采集上下文。
+  - 静态守卫 `AC-143 就绪判定：startDirection 必须先等 open 再 startCapture，且在途启动可作废`。
+
+### major 3 — 桥失败不通知离屏收尾，`li:connect` 不幂等
+
+- 病因：`failBridge` 只撤宿主，离屏的 AudioContext、直通 stream、会话、采集全部留着跑；`failed` 态的 `devicechange` 重试再发 `li:connect` 时 `bridge.dirs = dirs` 直接覆盖旧对象，每次拔插累积一套占用。
+- 修法：`failBridge` 在 `disconnectHost()` 后补 `await toOffscreen({ type: 'li:stop' }).catch(() => {})`（**不是** `li:disconnect`——spec 要求保留离屏文档继续监听 `devicechange`）；`connectBridge`（离屏侧）开头先 `disconnectBridge()` 使 `li:connect` 幂等。
+- 测试：`AC-141 桥失败必须通知离屏收尾翻译层…`（断言 `offscreenCalls` 含 `li:stop`、不含 `li:disconnect`、离屏文档保留）；`AC-136 li:connect 幂等：连发两次不得叠出第二套 AudioContext 与直通 stream`（活的播放器上下文恒为 2，旧的四个对象全部 `closed`、旧 track 全部 `ended`）。
+
+### major 4 — 「断开会议音频」被误报成桥失败
+
+- 病因：`disconnectAll` 先 `closeDocument()` 再 `dispatch(disconnected(state))`，而关文档必然掉 keepalive 端口，其 `onDisconnect` 看到 `state.bridge === 'connected'` 就走 `failBridge` → 误落盘 `bridgeFailed`、角标闪 `!`、弹 `li-failed` 通知，违反 AC-140 与「disconnected 不通知」。
+- 修法：加 `closingOffscreen` 标志，`closeDocument()` 之前置位、`dispatch(disconnected)` 之后（`finally`）复位，keepalive 的 `onDisconnect` 先判它。选这个而不是「把 dispatch 提前」，是因为它覆盖**整个**关闭窗口：真实 Chrome 里端口断开是异步送达的，可能落在 `closeDocument()` 返回之后、`dispatch` 的 await 之间。
+- 测试：`AC-140 关离屏文档掉 keepalive 端口不得被误判成桥丢失：全程零通知` —— 把假 `closeDocument` 改成**同步**触发 keepalive `onDisconnect`（最坏次序），断言 `notifications` 全程为空、终态 `bridge === 'disconnected'`、`bridgeError === null`、角标为空。
+
+### major 5 — aria 兜底会被参会者磁贴抢答
+
+- 病因：`parseMeetMuteState` 的兜底实现成「逐按钮、`mic` 连字或 aria 任一命中即返回」。参会者行与磁贴也带 `data-is-muted`，`aria-label` 常含 microphone/麦克风/マイク/마이크——排在真麦克风按钮之前就会抢答，**远端有人静音就会静默暂停我们的上行**。
+- 修法：两趟扫描。第一趟只用与界面语言无关的图标连字 `/\bmic(_off)?\b/i` 扫全部按钮；全不命中（含命中但属性不可读）才进第二趟用 aria。
+- 测试：`AC-130 图标连字整表优先于 aria 兜底：参会者磁贴不得抢答真麦克风按钮` —— reviewer 给的用例（`[{dataIsMuted:'true', ariaLabel:'Zhang San microphone'}, {dataIsMuted:'false', text:'mic'}]` 必须 `=== false`）加三种语言的参会者标签，外加「图标连字一个都不命中时才轮到 aria」的反向用例。原有三条 AC-130 用例（含 aria 兜底）一字未改仍通过。
+
+### minor 6 — `sidePanel.open` 丢用户手势
+
+- 修法：`panel.js` 的「停靠」点击处理器改为同步调用 `chrome.sidePanel.open({ windowId: chrome.windows.WINDOW_ID_CURRENT })?.catch(() => {})`，不再 `await chrome.tabs.query`（本扩展也没有 `tabs` 权限，那次查询拿不到 url，只为取 tabId）。
+- 测试：静态守卫 `AC-128 「停靠到侧栏」必须同步调用 sidePanel.open…`：处理器内（剔除注释后）不得出现 `await`/`async`/`chrome.tabs.query`，必须用 `windowId: chrome.windows.WINDOW_ID_CURRENT`。
+
+### minor 7 — `createPlayer` 失败时泄漏已获取的 stream
+
+- 修法：`connectBridge` 里给 `createPlayer` 单独包 try/catch，失败时 `for (const track of stream.getTracks()) track.stop()` 再 throw（逆序收尾只认已入册的方向，这条 stream 没人接管）。
+- 测试：`AC-136 createPlayer 失败：已拿到的直通 stream 必须释放，错误按媒体名归类`（让假 `setSinkId` 抛 `NotFoundError`，断言所有 track `readyState === 'ended'`）。
+
+### minor 8 — 媒体 DOMException 被压成 `api_error`
+
+- 修法：shared 新增 `classifyMediaError(name)`（`NotAllowedError|SecurityError → permission_denied`；`NotFoundError|OverconstrainedError|NotReadableError → device_missing`；其它 → `null`），用 `Map` 查表避免 `constructor`/`__proto__` 这类原型键误命中。离屏 `li:connect` 的收尾先经它，认出来就抛 `{ category }` 交给 `classifyError` 配中文文案。
+- 影响：桥失败通知不再自相矛盾（原本会说「翻译服务返回了错误」），且 `device_missing` 才触发的 `devicechange` 一次重试现在真的会发生。
+- 测试：`AC-141/AC-105 classifyMediaError：媒体 DOMException 先按名字归类…`（五个名字、十种认不出的输入、归类结果必须在 `CATEGORIES` 内且能被 `classifyError` 原样接住）+ 上面那条集成用例断言 `error.category === 'device_missing'`。
+
+### minor 9 — 探测脚本每次上报都留 unhandled rejection
+
+- 修法：`chrome.runtime.sendMessage(...)` 追加 `?.catch(() => {})`（SW 不 `sendResponse`）。保持单行，`chrome.runtime.sendMessage` 字面量不变以满足 AC-144 静态断言。
+- 测试：`AC-144 Meet 探测脚本只读…` 追加一条断言（上报必须接住返回的 Promise）。
+
+### minor 10 — 衬底在上下文时钟头 0.7 s 里误判「正在播译文」（修了效果，没动 `playhead = 0`）
+
+- 病因确认：`flush()` 把 `playhead` 归零后，`isTranslating({ now: ctx.currentTime, playhead: 0, releaseMs: 700 })` 在 `ctx.currentTime < 0.7` 时为真。`attachFloor()` 也调 `scheduleFloor()`，所以**刚建好的直通在头 0.7 s 里就被无故压低**——比 reviewer 描述的 flush 场景更常见。
+- 与 reviewer 建议的差别：reviewer 建议把 `playhead` 改成 `ctx.currentTime - FLOOR_RELEASE_MS / 1000` 或 `-Infinity`。**没有采用**，因为 spec Implementation Notes 的「衬底」一行字面写着 `flush()` 清源、`playhead = 0`、`scheduleFloor()`，AC-133 的静态检查也明文要求「`playhead` 归零」，而 `player-static.test.mjs`（spec Compatibility 清单内的遗留文件）已据此断言 `/playhead = 0/`——照建议改会同时违反 spec、AC-133 与「不得为迁就代码改既有测试断言」三条。
+- 实际修法：`playhead = 0` 保留，另加一面只表达「队列里有过译文」的旗子 `queued`（`enqueue` 置真、`flush` 置假），`scheduleFloor` 用 `queued && isTranslating(...)` 求 `translating`。目标增益仍然只来自 `floorTarget`/`isTranslating`，AC-137 的「队列播完且经过 700 ms 后才恢复」一字未变（释放窗口内 `queued` 仍为真）。没有用 `scheduled.size > 0` 代替，因为源自然播完时 `onended` 就把它清空了，会让释放窗口内的 `setFloorLevel` 提前恢复。
+- 测试：`AC-137 衬底不得在上下文时钟头 0.7 s 里误判「正在播译文」`（`attachFloor` 之后增益必须是 1；喂一帧译文后必须压低；在 `currentTime < 0.7` 的前提下 `li:stop` 后必须立即回 1.0）。另外 `AC-136 li:connect…` 与 `AC-110 passthrough…` 也都断言了「直通恒为 1.0」，变异时一并转红。
+
+### 新增测试清单（18 条）
+
+| 文件 | 用例 | 对应修复 |
+| --- | --- | --- |
+| `tests/integration/offscreen-flow.test.mjs`（新建，11 条） | `AC-136 li:connect：两方向各一条直通路…` | 基线覆盖（约束分角色、sinkId、直通图、建桥不采集） |
+| | `AC-136 li:connect 幂等…` | major 3 |
+| | `AC-136 createPlayer 失败：已拿到的直通 stream 必须释放…` | minor 7 + minor 8 |
+| | `AC-143 li:start：每个 translate 方向都 open 且 startCapture 返回后才回 ok` | AC-143 第一句（reviewer 点名的缺口） |
+| | `AC-143 在途启动可作废：等 open 期间收到 li:stop…` | major 2（循环半） |
+| | `AC-132/AC-143 取消静音的重建也能被作废…` | major 2（`startDirection` 半） |
+| | `AC-131 li:set-uplink-paused：只掐上行，下行对象引用与数据流不受影响` | AC-131 离屏侧（门控、flush、holdFloorFull、下行不受影响） |
+| | `AC-137 衬底不得在上下文时钟头 0.7 s 里误判「正在播译文」` | minor 10 |
+| | `AC-110 passthrough 方向：不建会话、不采集、直通恒为 1.0` | AC-110 运行时证据 |
+| | `AC-133 直通 track 被系统结束 → 上报 bridge-lost；devicechange 只上报不自作主张` | AC-133/AC-141 离屏侧 |
+| | `AC-140 li:disconnect：撤翻译层后停全部播放器与直通 track` | AC-140 离屏侧 |
+| `tests/integration/background-flow.test.mjs`（+3） | `AC-131/AC-144 没有 tabs 权限时 sender.tab.url 被裁掉…` | blocker 1 |
+| | `AC-141 桥失败必须通知离屏收尾翻译层…` | major 3 |
+| | `AC-140 关离屏文档掉 keepalive 端口不得被误判成桥丢失…` | major 4 |
+| `tests/unit/extension-static.test.mjs`（+2，另 2 条既有用例各加断言） | `AC-143 就绪判定：startDirection 必须先等 open 再 startCapture…` | major 2 + major 3 静态守卫 |
+| | `AC-128 「停靠到侧栏」必须同步调用 sidePanel.open…` | minor 6 |
+| | `AC-144 Meet 探测脚本只读…` 追加「上报必须接住 Promise」 | minor 9 |
+| `tests/unit/meeting-mute.test.mjs`（+1） | `AC-130 图标连字整表优先于 aria 兜底…` | major 5 |
+| `tests/unit/pure-functions.test.mjs`（+1） | `AC-141/AC-105 classifyMediaError…` | minor 8 |
+
+### 本轮的测试有效性抽查（定点变异）
+
+每条修法都单独回退过一次源码，确认**有且仅有**对应用例转红：
+
+| 回退的修法 | 转红的用例 |
+| --- | --- |
+| 去掉 `sender.url` 兜底 | `AC-131/AC-144 没有 tabs 权限时…` |
+| `failBridge` 不发 `li:stop` | `AC-141 桥失败必须通知离屏收尾翻译层…` |
+| 去掉 `closingOffscreen` 守卫 | `AC-140 关离屏文档掉 keepalive 端口…` |
+| 去掉 `startDirection` 的两处世代号比对 | `AC-132/AC-143 取消静音的重建也能被作废…` |
+| 去掉 `startTranslation` 循环里的两处比对 | `AC-143 在途启动可作废…` |
+| `connectBridge` 不先 `disconnectBridge()` | `AC-136 li:connect 幂等…` |
+| `createPlayer` 失败不停 track | `AC-136 createPlayer 失败…` |
+| 不按 DOMException 名字归类 | `AC-136 createPlayer 失败…` |
+| `audio.js` 去掉 `queued` 守卫 | `AC-136 li:connect…`、`AC-137 衬底不得误判…`、`AC-110 passthrough…` |
+| `parseMeetMuteState` 退回单趟混合匹配 | `AC-130 图标连字整表优先…` |
+| `panel.js` 退回 `await chrome.tabs.query` | `AC-128 「停靠到侧栏」…` |
+| `meet-mute.js` 去掉 `.catch` | `AC-144 Meet 探测脚本只读…` |
+
+### 本轮仍未做的事
+
+- `offscreen-flow.test.mjs` 用的是假 Web Audio / 假 mediaDevices / 假 WebSocket。它证明的是**接线与生命周期**，不证明真实设备行为：同一麦克风两次 `getUserMedia` 能否并存、`setSinkId(BlackHole 16ch)` 是否真的生效、ramp 听感与爆音、端到端延迟——全部仍留给实机手测（清单 1～14 未执行）。
+- `npm run e2e:real` 仍未运行（会产生真实 API 费用）。
+- Meet 真实 DOM 的选择器仍未在会议页确认。major 5 修的是「兜底顺序」，不是「选择器正确」；`data-is-muted` 与 `mic`/`mic_off` 连字依旧是未验证假设（风险 1 不变）。
+
 ## Blockers
 
 None（无阻塞项）。
@@ -240,3 +363,4 @@ None（无阻塞项）。
 - 按上面的清单做实机手测（1～14 + 真实后端），把结果与冷启动耗时、直通延迟、衬底体感、Meet 选择器实测追加到本日志。
 - 13 个语言码逐一实测；若有被拒的码，改 `src/shared/languages.mjs` 并更新 README 的语言列表。
 - 若手测发现 `flush()` 后 stop 爆音，按默认值改成 5 ms 淡出（只动 `audio.js`）。
+- 手测时额外确认本轮修复的实机表现：Meet 静音真的能被感知到（blocker 1，首轮实现在实机上这条路径完全不通）；「断开会议音频」不再闪 `!` 也不弹通知（major 4）；拔插耳机反复几次后 `chrome://webrtc-internals` 里没有累积的 getUserMedia 会话（major 3）；点「停靠」能打开侧栏（minor 6）。

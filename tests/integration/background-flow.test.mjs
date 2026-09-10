@@ -664,3 +664,24 @@ test('AC-122 离屏长连接断开：桥已连时判为文档丢失', async () =
   assert.equal(env.runtime().bridge, 'failed')
   assert.equal(env.notifications[0].title, '无法连接会议音频')
 })
+
+test('AC-105/AC-132 改语言时重建失败：翻译层 failed + 通知，桥保持', async () => {
+  const env = createEnv()
+  await loadBackground(env)
+  await powerOn(env)
+  env.notifications.length = 0
+
+  env.offscreen = async (message) => {
+    if (message.type === 'li:update-plan') return { ok: false, error: { category: 'network_unavailable', message: '重建失败。' } }
+    return { ok: true }
+  }
+  await env.toSw({ type: 'li:set-settings', to: 'sw', hear: 'ja' })
+
+  const runtime = env.runtime()
+  assert.equal(runtime.phase, 'error')
+  assert.equal(runtime.bridge, 'connected', '重建失败绝不影响桥')
+  assert.equal(runtime.error.category, 'network_unavailable')
+  assert.equal(env.notifications.length, 1)
+  assert.equal(env.notifications[0].title, '无法开启同传')
+  assert.equal(env.storage.local.settings.hear, 'ja', '设置仍然保存下来，重试时用新语言')
+})

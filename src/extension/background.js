@@ -321,7 +321,14 @@ async function applySettings(patch) {
   const before = buildDirections(current)
   const after = buildDirections(next)
   if (state.phase === 'on' && diffPlan(before, after).length > 0) {
-    const response = await toOffscreen({ type: 'li:update-plan', plan: after, server: serverConfig() })
+    let response
+    try {
+      response = await toOffscreen({ type: 'li:update-plan', plan: after, server: serverConfig() })
+    } catch (err) {
+      // 按新计划重建失败：翻译层整体 failed，桥不受影响
+      await failTranslation(classifyError(err))
+      return next
+    }
     const directions = {}
     for (const id of response.restarted ?? []) directions[id] = { status: 'running', mode: after[id].mode }
     await dispatch(planApplied(state, { directions, languages: languagesOf(next) }))

@@ -54,7 +54,7 @@
 npm test
 ```
 
-结果：**151 passed / 0 failed / 0 skipped**（`# tests 151 # pass 151 # fail 0`，耗时约 2.6 s，mock 后端，不打真 API、不碰真设备）。
+结果：**152 passed / 0 failed / 0 skipped**（`# tests 152 # pass 152 # fail 0`，耗时约 2.6 s，mock 后端，不打真 API、不碰真设备）。
 
 ```bash
 npm run build:ext     # → dist/extension（18 个 shared 模块 + 扩展本体 + 4 个图标）
@@ -113,7 +113,7 @@ node tools/gen-icons.mjs     # 已运行一次，4 个尺寸的 PNG 已提交
 | AC-129 | pass | `AC-129 选项页…`、`AC-129 衬底档位改动即时下发…` | automated-pass（授权提示 manual-pending） | `options.html`、`options.js`、`background.js` | 自动化覆盖按 kind 过滤、默认分配首项、preflight 结论、三选一写 `floorLevel` 并即时下发、自检后立即断开端口、各段说明文字；真实授权弹窗留手测 2 |
 | AC-130 | pass | `meeting-mute.test.mjs` 4 条 | automated-pass | `src/shared/meeting-mute.mjs` | 含摄像头按钮不被误判、`microphone-wrapper` 不命中、aria-label 兜底 |
 | AC-131 | pass | `AC-131/AC-132 Meet 静音…`、`AC-131/AC-132 上行暂停：SW 只转发…`、`AC-120/AC-131 meetingMute…` | automated-pass（听感与时延 manual-pending） | `background.js`、`offscreen.js`、`audio.js` | 自动化覆盖 meetingMuted、琥珀角标、`li:set-uplink-paused`、两处 `forwardMicAudio` 门控、`flush` + `holdFloorFull`；QuickTime 录 16ch 的 0.5 s 内消失留手测 5 |
-| AC-132 | pass | `AC-131/AC-132 Meet 静音…`、`AC-132/AC-144 非 Meet 来源忽略…`、`AC-133 上行挂起…` | automated-pass（听感 manual-pending） | `background.js`、`offscreen.js` | 自动化覆盖重建 `restarted:['uplink']`、`phase=off` 时不发消息、开启时 `uplinkPaused` 等于静音态、就绪通知的静音文案、静音态未知不暂停；Zoom 场景留手测 13 |
+| AC-132 | pass | `AC-131/AC-132 Meet 静音…`、`AC-132/AC-144 非 Meet 来源忽略…`、`AC-133 上行挂起…`、`AC-105/AC-132 改语言时重建失败…` | automated-pass（听感 manual-pending） | `background.js`、`offscreen.js` | 自动化覆盖重建 `restarted:['uplink']`、`phase=off` 时不发消息、开启时 `uplinkPaused` 等于静音态、就绪通知的静音文案、静音态未知不暂停；Zoom 场景留手测 13 |
 | AC-133 | pass | `AC-133 createPlayer 返回对象恰含…`、`AC-133 flush…`、`AC-133 stop 同时停止直通 track…`、`AC-133 上行挂起…` | automated-pass | `src/extension/audio.js`、`offscreen.js` | 返回键集合 deepEqual 六个方法；`player-static.test.mjs` 原有断言未改一字 |
 | AC-134 | pass | `server-routes.test.mjs` 5 条 | automated-pass | `src/server/index.mjs`、`package.json` | 目录/文件已删、`serveStatic`/`/api/config`/`readFile`/`process.env` 均不存在、三个路由 404 JSON、scripts 清单 |
 | AC-135 | pass | `AC-135 语言目录…`、`AC-135 原声是第 14 个选项…`、`AC-135 接线层不含语言码…`、`AC-126/AC-135 两个下拉…` | automated-pass | `src/shared/languages.mjs` | 13 个码作为集合与上游文档一致；五个接线文件逐个扫语言码与标签字面量 |

@@ -467,7 +467,7 @@
       "proof": [
         {
           "type": "test",
-          "ref": "`AC-131/AC-132 Meet 静音…`、`AC-132/AC-144 非 Meet 来源忽略…`、`AC-133 上行挂起…`"
+          "ref": "`AC-131/AC-132 Meet 静音…`、`AC-132/AC-144 非 Meet 来源忽略…`、`AC-133 上行挂起…`、`AC-105/AC-132 改语言时重建失败…`"
         }
       ],
       "files": [
@@ -680,7 +680,7 @@
         "command": "npm test",
         "status": "passed",
         "exitCode": 0,
-        "artifact": "tests 151 / pass 151 / fail 0"
+        "artifact": "tests 152 / pass 152 / fail 0"
       },
       {
         "command": "npm run build:ext",

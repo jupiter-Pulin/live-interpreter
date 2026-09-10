@@ -453,3 +453,13 @@ test('AC-129 选项页：设备角色按 kind 过滤、衬底三选一、本地�
   assert.ok(html.includes('模型可能不出声'), '需要同语言限制说明')
   assert.ok(!/自动连接/.test(html) && !/自动连接/.test(src), '不得出现自动连接开关')
 })
+
+test('AC-103 重开弹窗直接从 storage 渲染，不打扰正在跑的管道', async () => {
+  const src = await read('panel.js')
+  const load = blockFrom(src, 'async function load(')
+  assert.ok(/chrome\.storage\.local\.get\('settings'\)/.test(load) && /chrome\.storage\.session\.get\('runtime'\)/.test(load))
+  assert.ok(/render\(\)/.test(load), '读到两份数据后直接渲染')
+  assert.ok(!/sendMessage/.test(load), '打开弹窗不得向 SW 发任何消息（重开弹窗不能扰动管道）')
+  // 顶层只做渲染准备与订阅，没有任何会改变运行态的调用
+  assert.ok(!/li:power|li:disconnect|li:set-settings/.test(load))
+})

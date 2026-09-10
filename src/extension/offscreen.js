@@ -46,6 +46,12 @@ async function connectBridge({ deviceOverrides, floorLevel }) {
   // 幂等：失败态的 devicechange 重试会再发一次 li:connect，直接覆盖 bridge.dirs
   // 会把上一套 AudioContext / 直通 stream / 会话全部漏掉，每次拔插累积一份占用
   disconnectBridge()
+  // 上面的 disconnectBridge 刚自增过世代号，这就是本次建桥的世代。重叠的 li:connect
+  // 必须认出自己已被作废（第一次卡在没人应答的授权弹窗 → SW 超时 failBridge 放弃它 →
+  // 用户再点开启，第二套桥建好之后第一次的 getUserMedia 才返回）：否则它会用自己的 dirs
+  // 覆盖 bridge.dirs，两套桥同时活（同一输入混进同一输出两次），被覆盖那套的
+  // AudioContext 与直通 track 连 li:disconnect 都够不到，永久占着麦克风与虚拟声卡
+  const mine = epoch
   const devices = await enumerateAudioDevices()
   const conclusion = preflight(devices, deviceOverrides ?? {})
   if (conclusion.category !== 'ok') throw conclusion
@@ -81,14 +87,18 @@ async function connectBridge({ deviceOverrides, floorLevel }) {
       dirs[direction.id] = { player, floorStream: stream }
       built.push(dirs[direction.id])
     }
+    // 入册（写 bridge.dirs）前确认本次还算数：被作废就连同本次建好的一起逆序收尾
+    if (mine !== epoch) throw CANCELLED
   } catch (err) {
-    // 逆序收尾：任何一路失败都不留半座桥
+    // 逆序收尾：任何一路失败或被作废都不留半座桥
     for (const entry of built.reverse()) {
       try {
         entry.player.stop()
       } catch {
         // 已关闭的上下文忽略
       }
+      // player.stop() 不碰 track：不在这里停，这半座桥会一直占着麦克风与虚拟声卡
+      for (const track of entry.floorStream.getTracks()) track.stop()
     }
     // getUserMedia / setSinkId 抛的是 DOMException（没有 category），不按名字分类就会被
     // classifyError 压成 api_error：通知文案与「无法连接会议音频」自相矛盾，
@@ -260,7 +270,9 @@ async function setUplinkPaused(paused) {
   const restarted = []
   if (!uplinkPaused && plan?.uplink?.mode === 'translate' && live.uplink === null) {
     await startDirection('uplink')
-    restarted.push('uplink')
+    // 重建在途被作废时 startDirection 已就地收尾、没写 live：不得把它报成已恢复，
+    // 否则 SW 会把一条不存在的上行标成 running 并发 uplink-resumed
+    if (live.uplink !== null) restarted.push('uplink')
   }
   return restarted
 }
@@ -269,14 +281,24 @@ async function updatePlan(message) {
   const next = message.plan
   server = message.server ?? server
   const changed = diffPlan(plan, next)
+  // 两方向同时改语言是多轮 await：第一轮还在等 open 时 li:stop 到达（用户改完语言立刻
+  // 点关闭同传，或 failBridge / failTranslation），第二轮绝不能再起一条无人管的会话 +
+  // 24 kHz 采集。快照必须取在这里：startDirection 的快照取在它自己的入口，第二轮拿到的
+  // 已是递增后的 epoch，对它毫无作用。stopDirection 不自增 epoch，所以这个快照跨轮有效。
+  const mine = epoch
+  const restarted = []
   for (const id of changed) {
+    if (mine !== epoch) break
     stopDirection(id)
     plan = { ...plan, [id]: next[id] }
     await startDirection(id)
+    // 被作废的这一轮没真起来（startDirection 已就地收尾）：不得回报为已重启
+    if (mine !== epoch) break
+    restarted.push(id)
   }
   plan = next
   applyPauseGate()
-  return changed
+  return restarted
 }
 
 // ---------------------------------------------------------------- 消息

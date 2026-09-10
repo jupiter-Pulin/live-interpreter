@@ -129,13 +129,17 @@
         {
           "type": "test",
           "ref": "`AC-109 改语言：只重启受影响方向…`、`AC-109 planApplied…`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-109/AC-143 li:update-plan 两方向同改：第一轮在途时 li:stop 必须作废后续轮次`（tests/integration/offscreen-flow.test.mjs）"
         }
       ],
       "files": [
         "background.js",
         "offscreen.js"
       ],
-      "notes": "automated-pass（听感 manual-pending）；自动化覆盖 `li:update-plan` 的新计划、`runtime.languages`、未开启时不发消息；「另一方向对象引用不变」「新会话 session.update 的 language」留手测 7（离屏内部行为，Node 里无 Web Audio）"
+      "notes": "automated-pass（听感 manual-pending）；自动化覆盖 `li:update-plan` 的新计划、`runtime.languages`、未开启时不发消息；「另一方向对象引用不变」「新会话 session.update 的 language」留手测 7（离屏内部行为，Node 里无 Web Audio）。Review round 2 修了 P2：`updatePlan` 的多轮重启循环原先不受世代号守卫（`startDirection` 的快照取在它自己入口，第二轮拿到的是已递增的 epoch），两个语言一起改时第一轮在途收到 `li:stop` 仍会起第二轮；现在 `updatePlan` 自己取快照、每轮开头与每次 await 之后比对，且只回报真的重启成功的方向（返回 `restarted` 而非 `changed`）。新增用例断言被作废的第二轮不再建会话、无未关闭会话、活采集为 0、`restarted` 为 `[]`。「另一方向对象引用不变」与听感仍 manual-pending（手测 7）。"
     },
     {
       "id": "AC-110",
@@ -480,7 +484,7 @@
         "src/extension/audio.js",
         "src/shared/meeting-mute.mjs"
       ],
-      "notes": "automated-pass（听感与 0.5 s 时延 manual-pending）。Review round 1 修了 blocker：首轮 SW 侧只看 `sender.tab?.url`，而本扩展无 tabs 权限、无 meet host permission，真实 Chrome 会裁掉该字段，整条静音路径在实机上失效；现改为 `sender.url` 兜底并有针对性用例。离屏侧首轮只有静态断言，现补运行时证明：暂停后 `session.sendAudio` 与 `player.enqueue` 都不再被调用、已排队译文被 `flush` 停掉、上行直通增益为 1.0、下行 player 引用与译文入队不受影响。QuickTime 录 BlackHole 16ch 的「0.5 s 内译文消失、我的原声连续」仍未执行（手测 5）。"
+      "notes": "automated-pass（听感与 0.5 s 时延 manual-pending）。Review round 1 修了 blocker：首轮 SW 侧只看 `sender.tab?.url`，而本扩展无 tabs 权限、无 meet host permission，真实 Chrome 会裁掉该字段，整条静音路径在实机上失效；现改为 `sender.url` 兜底并有针对性用例。离屏侧首轮只有静态断言，现补运行时证明：暂停后 `session.sendAudio` 与 `player.enqueue` 都不再被调用、已排队译文被 `flush` 停掉、上行直通增益为 1.0、下行 player 引用与译文入队不受影响。QuickTime 录 BlackHole 16ch 的「0.5 s 内译文消失、我的原声连续」仍未执行（手测 5）。 Review round 2：暂停门控本身未改；`setUplinkPaused`（AC-131 的离屏入口）改为只在重建真的落地（`live.uplink !== null`）时回报 `restarted`，原先无条件 push 会让 SW 把一条被作废、并不存在的上行标成 `running`。手测 5 的 QuickTime 录音仍 manual-pending。"
     },
     {
       "id": "AC-132",
@@ -511,7 +515,7 @@
         "background.js",
         "offscreen.js"
       ],
-      "notes": "automated-pass（听感 manual-pending）。覆盖重建 `restarted:[\"uplink\"]`、`phase=off` 时不发离屏消息、开启时 `uplinkPaused` 等于静音态、就绪通知的静音文案、静音态未知不暂停。Review round 1 补离屏侧运行时用例：挂起→取消静音确实重建上行会话，且重建途中被 `li:stop` 作废时不会占走麦克风（major 2）。Zoom 等非 Meet 平台的实机场景仍未执行（手测 13）。"
+      "notes": "automated-pass（听感 manual-pending）。覆盖重建 `restarted:[\"uplink\"]`、`phase=off` 时不发离屏消息、开启时 `uplinkPaused` 等于静音态、就绪通知的静音文案、静音态未知不暂停。Review round 1 补离屏侧运行时用例：挂起→取消静音确实重建上行会话，且重建途中被 `li:stop` 作废时不会占走麦克风（major 2）。Zoom 等非 Meet 平台的实机场景仍未执行（手测 13）。 Review round 2 修了 P2 的一半：`setUplinkPaused` 的按需重建只在 `live.uplink !== null` 时 `restarted.push(\"uplink\")`，重建在途被 `li:stop` 作废时回 `restarted: []`，SW 不会把不存在的上行标成 `running`、也不会发 `uplink-resumed`；既有用例 `AC-132/AC-143 取消静音的重建也能被作废` 追加了这条返回值断言。「重建成功 → `restarted` 深等于 `[\"uplink\"]`」的既有断言不变。Zoom 等非 Meet 平台的实机场景仍未执行（手测 13）。"
     },
     {
       "id": "AC-133",
@@ -580,6 +584,10 @@
         {
           "type": "test",
           "ref": "`AC-136 createPlayer 失败：已拿到的直通 stream 必须释放，错误按媒体名归类`（tests/integration/offscreen-flow.test.mjs）"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-136/AC-140 重叠的 li:connect：迟到的那套必须自己收尾，不得覆盖已建好的桥`（tests/integration/offscreen-flow.test.mjs）"
         }
       ],
       "files": [
@@ -588,7 +596,7 @@
         "panel.js",
         "options.js"
       ],
-      "notes": "automated-pass（实机 manual-pending）；自动化覆盖两种约束、离屏只有一处 `getUserMedia`、UI 无 `li:connect`、建桥完成前未 `connectNative`；「直通延迟 < 50 ms」「耳机听到原声」留手测 1/12 与上游验证项；Review round 1 补离屏侧运行时证明：两方向各一条 `MediaStreamSource → floorGain(1.0) → 已 setSinkId 的 destination`、约束分别来自 `buildFloorConstraints(id,\"capture\"/\"mic\")`、建桥阶段不起采集、`li:connect` 幂等（major 3）、createPlayer 失败时释放已获取的 stream（minor 7）。直通延迟与听感仍 manual-pending"
+      "notes": "automated-pass（实机 manual-pending）；自动化覆盖两种约束、离屏只有一处 `getUserMedia`、UI 无 `li:connect`、建桥完成前未 `connectNative`；「直通延迟 < 50 ms」「耳机听到原声」留手测 1/12 与上游验证项；Review round 1 补离屏侧运行时证明：两方向各一条 `MediaStreamSource → floorGain(1.0) → 已 setSinkId 的 destination`、约束分别来自 `buildFloorConstraints(id,\"capture\"/\"mic\")`、建桥阶段不起采集、`li:connect` 幂等（major 3）、createPlayer 失败时释放已获取的 stream（minor 7）。直通延迟与听感仍 manual-pending。Review round 2 修了 P2：重叠的 `li:connect`（第一次卡在没人应答的授权弹窗 → SW 超时 `failBridge` 放弃它 → 用户再点开启并建成第二套桥 → 第一次的 `getUserMedia` 才返回）原先会用自己的 `dirs` 无条件覆盖 `bridge.dirs`，两套桥同时活且被覆盖那套的 2 个 AudioContext 与 2 条直通 track 连 `li:disconnect` 都够不到；现在 `connectBridge` 在头部 `disconnectBridge()`（它自身会自增 epoch）之后取快照，入册前比对，不一致就走既有逆序收尾并以取消错误返回。新增用例用可控的 `getUserMedia` 复现该次序。直通延迟与听感仍 manual-pending。"
     },
     {
       "id": "AC-137",
@@ -654,13 +662,17 @@
         {
           "type": "test",
           "ref": "`AC-140 li:disconnect：撤翻译层后停全部播放器与直通 track`（tests/integration/offscreen-flow.test.mjs）"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-136/AC-140 重叠的 li:connect：迟到的那套必须自己收尾，不得覆盖已建好的桥`（tests/integration/offscreen-flow.test.mjs）"
         }
       ],
       "files": [
         "background.js",
         "offscreen.js"
       ],
-      "notes": "automated-pass（实机 manual-pending）。Review round 1 修了 major：`disconnectAll` 先 `closeDocument()` 再 `dispatch(disconnected)`，而关文档必然掉 keepalive 端口，其 `onDisconnect` 会把「断开会议音频」误报成桥失败（落盘 bridgeFailed、角标闪 `!`、弹 li-failed 通知）；加 `closingOffscreen` 覆盖整个关闭窗口，新增用例用同步掉端口的最坏次序验证全程零通知。离屏侧新增用例断言 player 全关、会话全关、直通 track 全部 `readyState === \"ended\"`——此前这一条只能靠手测 12。macOS 橙色指示消失与面板观感仍未执行（手测 12）。"
+      "notes": "automated-pass（实机 manual-pending）。Review round 1 修了 major：`disconnectAll` 先 `closeDocument()` 再 `dispatch(disconnected)`，而关文档必然掉 keepalive 端口，其 `onDisconnect` 会把「断开会议音频」误报成桥失败（落盘 bridgeFailed、角标闪 `!`、弹 li-failed 通知）；加 `closingOffscreen` 覆盖整个关闭窗口，新增用例用同步掉端口的最坏次序验证全程零通知。离屏侧新增用例断言 player 全关、会话全关、直通 track 全部 `readyState === \"ended\"`——此前这一条只能靠手测 12。macOS 橙色指示消失与面板观感仍未执行（手测 12）。 Review round 2：`li:disconnect` 的行为未改，但补上了「够不到的那套桥」这个缺口——重叠的 `li:connect` 不再孤立一整套 AudioContext 与直通 track，新增用例在放行迟到的那次之后断言活上下文与活 track 仍为 2，`li:disconnect` 之后两者都归 0。macOS 橙色指示消失与面板观感仍未执行（手测 12）。"
     },
     {
       "id": "AC-141",
@@ -741,6 +753,10 @@
         {
           "type": "test",
           "ref": "`AC-132/AC-144 …就绪通知静音文案`"
+        },
+        {
+          "type": "test",
+          "ref": "`AC-109/AC-143 li:update-plan 两方向同改：第一轮在途时 li:stop 必须作废后续轮次`（tests/integration/offscreen-flow.test.mjs）"
         }
       ],
       "files": [
@@ -748,7 +764,7 @@
         "src/shared/runtime-state.mjs",
         "src/extension/background.js"
       ],
-      "notes": "automated-pass（macOS 通知显示 manual-pending）。首轮「等每个方向 open 且 startCapture 返回后才回 ok」只有手测承诺（声称 Node 里无 Web Audio 无法执行）；Review round 1 用假 Web Audio + 可控 open 的假 WebSocket 补齐了运行时证明：open 之前不得 startCapture、只有一个方向就绪时不得回 ok、两方向都 open 后才回 running，并加静态守卫。另修 major 2：在途启动现在可被 `li:stop`/`li:disconnect` 作废，不会在 SW 早已 error 之后继续采集送音。macOS 通知中心的实际显示与正文一致性仍未执行（手测 4）。"
+      "notes": "automated-pass（macOS 通知显示 manual-pending）。首轮「等每个方向 open 且 startCapture 返回后才回 ok」只有手测承诺（声称 Node 里无 Web Audio 无法执行）；Review round 1 用假 Web Audio + 可控 open 的假 WebSocket 补齐了运行时证明：open 之前不得 startCapture、只有一个方向就绪时不得回 ok、两方向都 open 后才回 running，并加静态守卫。另修 major 2：在途启动现在可被 `li:stop`/`li:disconnect` 作废，不会在 SW 早已 error 之后继续采集送音。macOS 通知中心的实际显示与正文一致性仍未执行（手测 4）。 Review round 2：`startDirection` / `startTranslation` 的就绪与作废判定未改；补的是 `updatePlan` 这条多轮路径——它原先的第二轮不受 `li:stop` 约束，会在 SW 早已收尾之后起一条无人管的会话 + 24 kHz 采集。macOS 通知中心的实际显示与正文一致性仍未执行（手测 4）。"
     },
     {
       "id": "AC-144",
@@ -799,7 +815,7 @@
         "command": "npm test",
         "status": "passed",
         "exitCode": 0,
-        "artifact": "tests 170 / pass 170 / fail 0（Review round 1 修复后；首轮为 152/152）"
+        "artifact": "tests 172 / pass 172 / fail 0（Review round 2 修复后；round 1 后为 170/170，首轮为 152/152）"
       },
       {
         "command": "npm run build:ext",
@@ -841,6 +857,26 @@
         "newTests": 18,
         "mutationVerified": true,
         "notes": "全部 10 项已修，每项都做了定点变异验证（回退修法后有且仅有对应用例转红）。新增 tests/integration/offscreen-flow.test.mjs（11 条），填补 reviewer 点名的离屏侧零覆盖缺口；该文件用假 Web Audio / 假 mediaDevices / 假 WebSocket，只证明接线与生命周期，不证明真实设备行为。"
+      },
+      {
+        "round": 2,
+        "verdict": "ready-with-nits",
+        "findings": {
+          "blocker": 0,
+          "major": 0,
+          "minor": 2
+        },
+        "commits": [
+          "本次提交（修复、测试、日志与证据同一提交；不 amend 故不回填哈希）"
+        ],
+        "allAddressed": true,
+        "deviations": [
+          "reviewer 的可选建议（`panel.js` 在模块加载时 `chrome.windows.getCurrent()` 缓存 windowId）未做：`extension-static.test.mjs` 的 AC-128 用例有一条既有断言要求 `windowId: chrome.windows.WINDOW_ID_CURRENT`，照建议改必须改掉既有断言，与本轮约束冲突；该建议是稳妥性改进而非缺陷，现状不丢用户手势、不需额外权限，哨兵能否被 sidePanel.open 接受仍留实机手测。",
+          "两处新加的行未被用例 falsify，如实记录而不当成已验证：`updatePlan` 循环轮首的 break（与 await 之后那次之间没有 await，今天永不可能为真，留着是为与 `startTranslation` 写法一致并防后续插入 await）；逆序收尾里补的 `track.stop()`（正常路径上 `player.stop()` 已停掉 `attachFloor` 记下的 floorTracks，它只覆盖 attachFloor 自身抛异常而该方向仍被入册的那条缝，与 `disconnectBridge` 的既有写法同理）。"
+        ],
+        "newTests": 2,
+        "mutationVerified": true,
+        "notes": "2 个 P2 资源泄漏全部已修（updatePlan 多轮重启不受 epoch 守卫；重叠的 li:connect 孤立一整套桥），各补一条 tests/integration/offscreen-flow.test.mjs 集成用例，并给既有用例追加 1 条返回值断言；三条决定性修法都做了定点变异验证（回退后有且仅有对应用例转红）。未改任何既有断言、未动 spec 四份文档、未改 tests/unit/player-static.test.mjs 与其它遗留测试文件。manual-pending 项一项未改成已验证。"
       }
     ]
   },

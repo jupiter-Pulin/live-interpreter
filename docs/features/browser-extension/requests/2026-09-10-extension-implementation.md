@@ -29,7 +29,8 @@
 | 4 | `d1337e0` | SW 编排、离屏音频桥与翻译叠加、Meet 只读探测；静态纪律 + SW 全流程集成测试 |
 | 5 | `9aecbac` | 弹窗/侧栏面板与选项页 |
 | 6 | `d0c7d52` + `0f5c10c` | README「浏览器插件」章节、请求日志、AC-103 静态用例；改语言重建失败按翻译层 failed 处理 |
-| review r1 | `dbc09d3`、`90c2b6a`、`8c5c6d3`、本次 | reviewer 的 1 blocker + 4 major + 5 minor 修复、离屏侧集成测试、日志与证据更新（见「Review round 1 修复」）|
+| review r1 | `dbc09d3`、`90c2b6a`、`8c5c6d3`、`3bdae62` | reviewer 的 1 blocker + 4 major + 5 minor 修复、离屏侧集成测试、日志与证据更新（见「Review round 1 修复」）|
+| review r2 | 本次 | 第二轮 review 的 2 个 P2 资源泄漏（在途建桥与多轮重启的世代号守卫）+ 2 条集成用例、日志与证据更新（见「Review round 2 修复」）|
 
 ## Changes
 
@@ -58,6 +59,8 @@ npm test
 结果（首轮实现）：**152 passed / 0 failed / 0 skipped**（耗时约 2.6 s，mock 后端，不打真 API、不碰真设备）。
 
 结果（Review round 1 修复后）：**170 passed / 0 failed / 0 skipped**（`# tests 170 # pass 170 # fail 0`，耗时约 2.5 s）。新增 18 条用例，既有断言一字未改。
+
+结果（Review round 2 修复后）：**172 passed / 0 failed / 0 skipped**（`# tests 172 # pass 172 # fail 0`，耗时约 2.5 s）。新增 2 条用例、给 1 条既有用例追加断言，既有断言一字未改。
 
 ```bash
 npm run build:ext     # → dist/extension（18 个 shared 模块 + 扩展本体 + 4 个图标）
@@ -354,6 +357,43 @@ node tools/gen-icons.mjs     # 已运行一次，4 个尺寸的 PNG 已提交
 - `npm run e2e:real` 仍未运行（会产生真实 API 费用）。
 - Meet 真实 DOM 的选择器仍未在会议页确认。major 5 修的是「兜底顺序」，不是「选择器正确」；`data-is-muted` 与 `mic`/`mic_off` 连字依旧是未验证假设（风险 1 不变）。
 
+## Review round 2 修复
+
+第二轮独立 review 结论 **Ready with nits**：无 blocker / major，留下 2 个 P2 资源泄漏。两条都修了并各补一条集成用例。`npm test`：**170 → 172 通过 / 0 失败**（新增 2 条用例、给既有用例追加 1 条断言，无既有断言被改动，不动 spec 四份文档的契约）。
+
+### P2-1 — `updatePlan` 的重启循环不受 `epoch` 守卫
+
+- 病因：`startDirection` 的世代号快照 `const mine = epoch` 取在**它自己的入口**，所以 `updatePlan` 多轮循环的第二轮拿到的是已递增后的 epoch，`li:stop` 对它完全失效。触发：`phase = on` 时一条 `li:set-settings { hear, partnerHears }` 让 `diffPlan` 返回两个方向，第一轮 `await startDirection('downlink')` 还在等 `open` 时 `li:stop` 到达（用户改完语言立刻点「关闭同传」，或 `failBridge` / `failTranslation`）。后果：`li:stop` 之后仍起一条无人管的会话 + 一路 24 kHz 采集（占着麦克风、real 后端照样按送入时长计费、译文可能进会议），并且把早已收尾的方向回报成 `restarted` → SW 按 `response.restarted` 把它标成 `running`。
+- 修法：`updatePlan` 开头取 `const mine = epoch`（只有 `stopTranslation` / `disconnectBridge` 自增 epoch，`stopDirection` 不自增，所以这个快照跨轮有效）；循环每轮开头 `if (mine !== epoch) break`，每轮 `await startDirection(id)` 之后再比一次，只有比对通过的方向才 `restarted.push(id)`，返回值从 `changed` 改成 `restarted`。
+- 同一处的另一半：`setUplinkPaused` 的按需重建改成只在 `live.uplink !== null`（重建真的落地）时 `restarted.push('uplink')`。原来无条件 push，重建在途被作废时会让 SW 把一条不存在的上行标成 `running` 并发 `uplink-resumed`。
+- 测试：新增 `AC-109/AC-143 li:update-plan 两方向同改：第一轮在途时 li:stop 必须作废后续轮次`（两方向同时改成 `hear: 'ja'` / `partnerHears: 'fr'` → 第一轮卡在等 `open` → `li:stop` → 放行迟到的 `open`）。断言：会话总数仍为 3（被作废的第二轮不得再建）、三条会话全部 `closedTimes === 1`、活的采集上下文为 0、`restarted` 深等于 `[]`、桥的两个播放器仍然活着。另给既有用例 `AC-132/AC-143 取消静音的重建也能被作废` **追加**一条断言：`restarted` 深等于 `[]`（该用例原先只断言调用已 settle，没看返回值）。
+
+### P2-2 — 重叠的 `li:connect` 孤立一整套桥
+
+- 病因：`connectBridge` 在 `enumerateAudioDevices` / `getUserMedia` / `createPlayer` 三个 await 之后**无条件**写 `bridge.roles/labels/dirs`；头部的 `disconnectBridge()` 只认已入册的上一套，对在途那一套无效。触发：第一次 `li:connect` 卡在没人应答的授权弹窗里 → SW 10 s 超时 `failBridge` 放弃那个 Promise（并发 `li:stop`）→ 用户再点开启，`li:connect#2` 成功写入 `bridge.dirs` → 随后 #1 的 `getUserMedia` 才返回，用自己的 `dirs` 覆盖。后果：两套桥同时活（同一输入混进同一输出两次），被覆盖那套的 2 个 AudioContext 与 2 条直通 track 连 `li:disconnect` 都够不到，永久占着麦克风与虚拟声卡。
+- 修法：`connectBridge` 在头部 `disconnectBridge()` 之后取 `const mine = epoch`（确认过：`disconnectBridge` 本身就 `cancelPendingStarts()` 自增，所以「第二次 `li:connect`」与「`failBridge` 的 `li:stop`」两条路径都会作废在途那次，无需补自增）；入册（写 `bridge.dirs`）前 `if (mine !== epoch) throw CANCELLED`，由既有的逆序收尾把本次建好的方向全部停掉，并以取消错误返回。
+- SW 侧不会因此多出通知：`withTimeout` 早已给那个 Promise 挂了拒绝处理器（超时后的 `reject` 是空操作），`connectBridge` 的 `catch` 也早已跑完（`bridge = failed` 且通知已发），迟到的 `{ ok: false }` 没有第二个 `await` 接它。
+- 测试：新增 `AC-136/AC-140 重叠的 li:connect：迟到的那套必须自己收尾，不得覆盖已建好的桥`。假 `mediaDevices` 加了 `holdNextGetUserMedia()`（卡住下一次 `getUserMedia` 的可控 Promise）：第一次 `li:connect` 卡住（断言此时一个播放器都没有）→ `li:stop` → 第二次成功（2 个活上下文）→ 放行第一次，断言它回 `ok: false`、活的 AudioContext 仍为 2、活的直通 track 仍为 2；再 `li:disconnect`，断言两者都归 0——被覆盖的那套正是 `li:disconnect` 够不到的那套。
+
+### 本轮的测试有效性抽查（定点变异）
+
+| 回退的修法 | 转红的用例 |
+| --- | --- |
+| `connectBridge` 去掉入册前的世代号比对 | `AC-136/AC-140 重叠的 li:connect…` |
+| `updatePlan` 去掉 `await startDirection` 之后的比对 | `AC-109/AC-143 li:update-plan 两方向同改…` |
+| `setUplinkPaused` 无条件 `restarted.push('uplink')` | `AC-132/AC-143 取消静音的重建也能被作废…` |
+| `updatePlan` 去掉循环轮首的 `break` | **无用例转红**（见下） |
+| 逆序收尾里新加的 `track.stop()` | **无用例转红**（见下） |
+
+两条「无用例转红」如实记录，不当成已验证：
+
+- `updatePlan` 轮首的 `break` 与 `await` 之后的 `break` 之间没有 await，所以轮首那次比对今天永远不可能为真。留着是为了与上面 `startTranslation` 的「每轮开头与每次 await 之后都确认」写法一致，并防住以后在 `stopDirection` 前插入 await；真正起作用、也真被用例 falsify 的是 `await` 之后那次。
+- 逆序收尾里补的 `for (const track of entry.floorStream.getTracks()) track.stop()` 在正常路径上是冗余的：`player.stop()` 自己就会停掉 `attachFloor` 记下的 `floorTracks`（所以新用例「活 track 为 2」那条断言在没有这一行时也成立）。它只覆盖「`attachFloor` 抛了异常（被它自己吞进 `onPlaybackError`，`floorTracks` 留空）而该方向仍被入册」这条缝，与 `disconnectBridge` 里 `player.stop()` + 显式停 track 的既有写法同理。
+
+### reviewer 的可选建议（未做）
+
+- 建议 `panel.js` 在模块加载时 `chrome.windows.getCurrent()` 缓存 `windowId`、点击处理器同步用缓存值调用 `chrome.sidePanel.open({ windowId })`。**未做**：`tests/unit/extension-static.test.mjs` 的 `AC-128 「停靠到侧栏」必须同步调用 sidePanel.open…` 里有一条既有断言 `assert.ok(/windowId: chrome\.windows\.WINDOW_ID_CURRENT/.test(dock))`，照建议改必须改掉它，与本轮「既有断言不改」的约束直接冲突（建议本身也只是 SHOULD 级的稳妥性改进，不是缺陷）。现状用 `WINDOW_ID_CURRENT` 哨兵，不丢用户手势、不需要额外权限；哨兵能否被 `sidePanel.open` 接受仍留实机手测确认（Remaining Work 里已有「点『停靠』能打开侧栏」这一项）。
+
 ## Blockers
 
 None（无阻塞项）。
@@ -364,3 +404,4 @@ None（无阻塞项）。
 - 13 个语言码逐一实测；若有被拒的码，改 `src/shared/languages.mjs` 并更新 README 的语言列表。
 - 若手测发现 `flush()` 后 stop 爆音，按默认值改成 5 ms 淡出（只动 `audio.js`）。
 - 手测时额外确认本轮修复的实机表现：Meet 静音真的能被感知到（blocker 1，首轮实现在实机上这条路径完全不通）；「断开会议音频」不再闪 `!` 也不弹通知（major 4）；拔插耳机反复几次后 `chrome://webrtc-internals` 里没有累积的 getUserMedia 会话（major 3）；点「停靠」能打开侧栏（minor 6）。
+- 手测时确认 Review round 2 的两条修复：两个语言一起改完立刻点「关闭同传」后，`chrome://webrtc-internals` 里没有残留会话、BlackHole 16ch 录不到译文（P2-1）；第一次「开启同传」时把麦克风授权弹窗挂住到超时、再点一次开启成功后放掉弹窗，确认麦克风占用与 AudioContext 只有一套、「断开会议音频」后 macOS 橙色指示消失（P2-2）。

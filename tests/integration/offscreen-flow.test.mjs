@@ -237,11 +237,17 @@ function createEnv() {
   const swListeners = []
   const deviceChangeListeners = []
   let getUserMediaFailure = null
+  let getUserMediaHold = null
 
   const mediaDevices = {
     enumerateDevices: async () => DEVICES,
     getUserMedia: async (constraints) => {
       if (getUserMediaFailure) throw getUserMediaFailure
+      if (getUserMediaHold) {
+        const hold = getUserMediaHold
+        getUserMediaHold = null
+        await hold
+      }
       const track = makeTrack(constraints.audio.deviceId.exact)
       const stream = { constraints, tracks: [track], getTracks: () => [track] }
       streams.push(stream)
@@ -275,6 +281,18 @@ function createEnv() {
     failGetUserMedia: (err) => {
       getUserMediaFailure = err
     },
+    // 卡住下一次 getUserMedia：用来制造「第一次 li:connect 还停在没人应答的授权弹窗里」，
+    // 返回的函数放行它并等它跑完
+    holdNextGetUserMedia: () => {
+      let release
+      getUserMediaHold = new Promise((resolve) => {
+        release = resolve
+      })
+      return async () => {
+        release()
+        await settle()
+      }
+    },
     fireDeviceChange: async () => {
       for (const fn of deviceChangeListeners) fn()
       await settle()
@@ -283,6 +301,9 @@ function createEnv() {
     players: () => contexts.filter((c) => c.options.sampleRate === undefined),
     captures: () => contexts.filter((c) => c.options.sampleRate === 24000),
     openPlayers: () => env.players().filter((c) => !c.closed),
+    openCaptures: () => env.captures().filter((c) => !c.closed),
+    // 还在占着设备的直通 track：漏掉的那套桥正是没人停得下来的那套
+    liveTracks: () => streams.flatMap((s) => s.getTracks()).filter((t) => t.readyState === 'live'),
     floorGainOf: (ctx) => ctx.gains[0],
     async send(message) {
       let response
@@ -429,6 +450,39 @@ test('AC-136 li:connect 幂等：连发两次不得叠出第二套 AudioContext 
   }
 })
 
+test('AC-136/AC-140 重叠的 li:connect：迟到的那套必须自己收尾，不得覆盖已建好的桥', async () => {
+  const env = await freshOffscreen()
+
+  // 第一次 li:connect 卡在没人应答的授权弹窗上
+  const release = env.holdNextGetUserMedia()
+  const first = env.sendNoWait({ type: 'li:connect', deviceOverrides: {}, floorLevel: 0.25 })
+  await settle()
+  assert.equal(first.settled, false, '第一次必须真的还卡在 getUserMedia 上')
+  assert.equal(env.players().length, 0, 'getUserMedia 没返回就不可能有播放器')
+
+  // SW 侧 10 s 超时 → failBridge 放弃那个 Promise 并发 li:stop；用户再点开启 → 第二次成功
+  assert.deepEqual(await env.send({ type: 'li:stop' }), { ok: true })
+  const second = await env.connect()
+  assert.equal(second.ok, true)
+  assert.equal(env.openPlayers().length, 2, '第二套桥必须正常建起来')
+
+  // 放行第一次：它必须认出自己已被作废，把本次已占的设备全部还回去
+  await release()
+  assert.equal(first.settled, true)
+  assert.equal(first.value.ok, false, '被作废的建桥不得回 ok')
+  assert.equal(
+    env.openPlayers().length,
+    2,
+    `迟到的那套不得再建/留下 AudioContext（否则两套桥同时活，同一输入混进同一输出两次），实际活 ${env.openPlayers().length} 个`
+  )
+  assert.equal(env.liveTracks().length, 2, '迟到的那套直通 track 必须停掉，否则永久占着麦克风')
+
+  // 被覆盖的那套正是 li:disconnect 够不到的那套：断开后必须一个不剩
+  assert.deepEqual(await env.send({ type: 'li:disconnect' }), { ok: true })
+  assert.equal(env.openPlayers().length, 0, '断开后不得剩下任何活的 AudioContext')
+  assert.equal(env.liveTracks().length, 0, '断开后不得剩下任何活的直通 track')
+})
+
 test('AC-136 createPlayer 失败：已拿到的直通 stream 必须释放，错误按媒体名归类', async () => {
   const env = await freshOffscreen()
   const failure = Object.assign(new Error('sink 不可用'), { name: 'NotFoundError' })
@@ -550,6 +604,48 @@ test('AC-132/AC-143 取消静音的重建也能被作废：迟到的 open 不得
   )
   for (const ctx of env.captures()) assert.equal(ctx.closed, true, '撤翻译层后不得留任何活的采集上下文')
   assert.equal(rebuilding.settled, true)
+  assert.deepEqual(
+    rebuilding.value,
+    { ok: true, restarted: [] },
+    '没起来的重建不得回报为已恢复，否则 SW 把一条不存在的上行标成 running 并发 uplink-resumed'
+  )
+})
+
+test('AC-109/AC-143 li:update-plan 两方向同改：第一轮在途时 li:stop 必须作废后续轮次', async () => {
+  const env = await freshOffscreen()
+  await env.connect()
+  await env.send({ type: 'li:start', plan: PLAN, uplinkPaused: false, server: SERVER })
+  assert.equal(env.sockets.length, 2)
+  assert.equal(env.openCaptures().length, 2)
+
+  // 一条 li:set-settings 同时改两个语言 → diffPlan 返回两个方向 → updatePlan 要跑两轮
+  const next = buildDirections({ ...DEFAULT_SETTINGS, hear: 'ja', partnerHears: 'fr' })
+  env.FakeWebSocket.autoOpen = false
+  const updating = env.sendNoWait({ type: 'li:update-plan', plan: next, server: SERVER })
+  await settle()
+  assert.equal(env.sockets.length, 3, '第一轮必须真的在重建 downlink')
+  assert.equal(env.sockets[0].closedTimes, 1, '旧 downlink 会话必须已关')
+
+  // 改完语言立刻点「关闭同传」（failBridge / failTranslation 同样发 li:stop）
+  assert.deepEqual(await env.send({ type: 'li:stop' }), { ok: true })
+  // 迟到的 open：第一轮就地收尾，第二轮不得再起
+  env.sockets[2].fireOpen()
+  await settle()
+
+  assert.equal(
+    env.sockets.length,
+    3,
+    `被作废的第二轮不得再建会话（否则 li:stop 之后还有一条无人管的会话在计费、译文还会进会议），实际多出 ${env.sockets.length - 3} 条`
+  )
+  for (const socket of env.sockets) assert.equal(socket.closedTimes, 1, '不得留下未关闭的会话')
+  assert.equal(env.openCaptures().length, 0, 'li:stop 之后不得留下任何活的采集上下文')
+  assert.equal(updating.settled, true)
+  assert.deepEqual(
+    updating.value,
+    { ok: true, restarted: [] },
+    '被作废的方向不得回报为已重启，否则 SW 把早已收尾的方向标成 running'
+  )
+  assert.equal(env.openPlayers().length, 2, '撤翻译层不得动桥')
 })
 
 test('AC-131 li:set-uplink-paused：只掐上行，下行对象引用与数据流不受影响', async () => {

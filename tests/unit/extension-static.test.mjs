@@ -199,6 +199,37 @@ test('AC-110 passthrough 方向的分支只看 plan 的 mode', async () => {
   assert.ok(start.indexOf('startCapture(') > before, 'mode 判定必须在采集之前')
 })
 
+test('AC-143 就绪判定：startDirection 必须先等 open 再 startCapture，且在途启动可作废', async () => {
+  const off = await read('offscreen.js')
+  const start = blockFrom(off, 'async function startDirection(')
+  const waitOpen = start.indexOf("session.on('open'")
+  const capture = start.indexOf('startCapture(')
+  assert.ok(waitOpen >= 0, 'startDirection 必须等会话的 open 事件')
+  assert.ok(capture >= 0, 'startDirection 必须起采集')
+  assert.ok(waitOpen < capture, '等 open 的代码必须排在 startCapture( 之前：open 之前就采集等于白烧设备与额度')
+
+  // 每个 await 之后都要确认这次启动还算数：否则 li:stop 之后仍会占设备、覆盖 live[id]
+  assert.ok(/const mine = epoch/.test(start), 'startDirection 必须在入口快照世代号')
+  assert.equal(
+    (start.match(/mine !== epoch/g) ?? []).length,
+    2,
+    'open 之后与写 live 之前各要比一次世代号'
+  )
+  const live = start.indexOf('live[directionId] = {')
+  assert.ok(start.lastIndexOf('mine !== epoch') < live, '最后一次世代号比对必须在写 live 之前')
+
+  const stop = blockFrom(off, 'function stopTranslation(')
+  assert.ok(/cancelPendingStarts\(\)/.test(stop), '撤翻译层必须作废在途启动')
+  const disconnect = blockFrom(off, 'function disconnectBridge(')
+  assert.ok(/cancelPendingStarts\(\)/.test(disconnect), '撤桥必须作废在途启动')
+  // 桥的建立必须幂等：devicechange 重试会再发一次 li:connect
+  // （connectBridge 的参数是解构模式，blockFrom 取不到函数体，这里按出现位置判定）
+  const connectAt = off.indexOf('async function connectBridge(')
+  const resetAt = off.indexOf('disconnectBridge()', connectAt)
+  const enumerateAt = off.indexOf('enumerateAudioDevices(', connectAt)
+  assert.ok(resetAt >= 0 && resetAt < enumerateAt, 'connectBridge 必须先收尾旧桥再枚举设备，否则每次重试叠一套占用')
+})
+
 test('AC-136/AC-119 离屏的直通约束只经 buildFloorConstraints', async () => {
   const off = await read('offscreen.js')
   assert.ok(/import \{[^}]*buildFloorConstraints[^}]*\} from '\/shared\/audio-routing\.mjs'/s.test(off))
@@ -240,6 +271,11 @@ test('AC-144 Meet 探测脚本只读：不写 DOM、不联网、不碰媒体、�
   assert.ok(sends[0].includes("type: 'li:meeting-mute'") && sends[0].includes("to: 'sw'"))
   assert.ok(/pagehide/.test(src), '离开页面时必须把静音态标为未知')
   assert.ok(/querySelectorAll\('\[data-is-muted\]'\)/.test(src))
+  // SW 不 sendResponse，返回的 Promise 必须接住：每秒一次上报的 unhandled rejection 会刷满会议页控制台
+  assert.ok(
+    /chrome\.runtime\.sendMessage\([^\n]*\)\??\.catch\(/.test(src),
+    '上报必须接住返回的 Promise（SW 不 sendResponse，否则每次上报都留一条 unhandled rejection）'
+  )
 })
 
 test('AC-144/AC-119 静音判定只经 parseMeetMuteState，且只信任 Meet 标签的上报', async () => {
@@ -452,6 +488,17 @@ test('AC-129 选项页：设备角色按 kind 过滤、衬底三选一、本地�
   assert.ok(html.includes('建议戴耳机'), '需要「建议耳机」提示')
   assert.ok(html.includes('模型可能不出声'), '需要同语言限制说明')
   assert.ok(!/自动连接/.test(html) && !/自动连接/.test(src), '不得出现自动连接开关')
+})
+
+test('AC-128 「停靠到侧栏」必须同步调用 sidePanel.open，不得先 await 掉用户手势', async () => {
+  const src = await read('panel.js')
+  // 去掉注释再查：注释里本来就会提到 await 这件事
+  const dock = blockFrom(src, "el('dock').addEventListener('click'").replace(/\/\/[^\n]*/g, '')
+  assert.ok(/chrome\.sidePanel\.open\(/.test(dock), '停靠按钮必须打开侧栏')
+  assert.ok(!/\bawait\b/.test(dock), 'sidePanel.open 需要用户手势，放在 await 之后手势已过期')
+  assert.ok(!/async/.test(dock), '点击处理器不得是 async：第一个 await 就会丢掉手势')
+  assert.ok(!/chrome\.tabs\.query/.test(dock), '不得为了拿 tabId 先查标签（而且本扩展没有 tabs 权限）')
+  assert.ok(/windowId: chrome\.windows\.WINDOW_ID_CURRENT/.test(dock), '用当前窗口常量即可，无需异步取 tabId')
 })
 
 test('AC-103 重开弹窗直接从 storage 渲染，不打扰正在跑的管道', async () => {

@@ -7,7 +7,7 @@ import { diffPlan } from '/shared/direction-plan.mjs'
 import { selectSessionEndpoint } from '/shared/session-endpoint.mjs'
 import { createDirectionSubtitles } from '/shared/direction-subtitles.mjs'
 import { createLatencyTracker } from '/shared/latency.mjs'
-import { classifyError } from '/shared/errors.mjs'
+import { classifyError, classifyMediaError } from '/shared/errors.mjs'
 
 // 离屏文档：音频桥与翻译层的宿主。只做接线，判定全部来自 /shared。
 //
@@ -25,6 +25,16 @@ let uplinkPaused = false
 let plan = null
 let server = null
 let devicechangeBound = false
+// 在途启动的世代号：撤翻译层（li:stop / li:disconnect）时自增，让还卡在 await 里的
+// startDirection 知道自己已被作废——否则它会在宿主早已退出、SW 早已 error 之后继续
+// 采集送音计费，并把译文 enqueue 进会议，还会覆盖 live[id] 让旧会话永不 close。
+let epoch = 0
+// 被作废不是真失败：SW 那边早已走完超时/失败流程，这个 reject 没人接
+const CANCELLED = { category: 'api_error', message: '启动已被取消。' }
+
+function cancelPendingStarts() {
+  epoch += 1
+}
 
 function emit(event, directionId, payload) {
   chrome.runtime.sendMessage({ type: 'li:pipeline-event', to: 'sw', event, directionId, payload }).catch(() => {})
@@ -33,6 +43,9 @@ function emit(event, directionId, payload) {
 // ---------------------------------------------------------------- 桥
 
 async function connectBridge({ deviceOverrides, floorLevel }) {
+  // 幂等：失败态的 devicechange 重试会再发一次 li:connect，直接覆盖 bridge.dirs
+  // 会把上一套 AudioContext / 直通 stream / 会话全部漏掉，每次拔插累积一份占用
+  disconnectBridge()
   const devices = await enumerateAudioDevices()
   const conclusion = preflight(devices, deviceOverrides ?? {})
   if (conclusion.category !== 'ok') throw conclusion
@@ -44,10 +57,18 @@ async function connectBridge({ deviceOverrides, floorLevel }) {
     for (const direction of Object.values(DIRECTIONS)) {
       const inputId = conclusion.roles[direction.inputRole]
       const stream = await navigator.mediaDevices.getUserMedia(buildFloorConstraints(inputId, direction.inputRole))
-      const player = await createPlayer(resolveSinkId(direction.id, conclusion.roles), {
-        floorLevel,
-        onPlaybackError: (err) => emit('bridge-lost', direction.id, classifyError(err)),
-      })
+      let player
+      try {
+        player = await createPlayer(resolveSinkId(direction.id, conclusion.roles), {
+          floorLevel,
+          onPlaybackError: (err) => emit('bridge-lost', direction.id, classifyError(err)),
+        })
+      } catch (err) {
+        // 播放器没建起来就没人接管这条 stream（逆序收尾只认已入册的方向），
+        // 不在这里 stop 就会一直占着麦克风/虚拟声卡
+        for (const track of stream.getTracks()) track.stop()
+        throw err
+      }
       player.attachFloor(stream)
       for (const track of stream.getTracks()) {
         track.addEventListener('ended', () =>
@@ -69,7 +90,11 @@ async function connectBridge({ deviceOverrides, floorLevel }) {
         // 已关闭的上下文忽略
       }
     }
-    throw err
+    // getUserMedia / setSinkId 抛的是 DOMException（没有 category），不按名字分类就会被
+    // classifyError 压成 api_error：通知文案与「无法连接会议音频」自相矛盾，
+    // 且 device_missing 才触发的 devicechange 一次重试永远不会发生
+    const category = classifyMediaError(err?.name)
+    throw category === null ? err : { category }
   }
 
   bridge.roles = conclusion.roles
@@ -85,6 +110,7 @@ async function connectBridge({ deviceOverrides, floorLevel }) {
 }
 
 function disconnectBridge() {
+  cancelPendingStarts()
   stopTranslation()
   for (const entry of Object.values(bridge.dirs ?? {})) {
     try {
@@ -119,6 +145,7 @@ function stopDirection(directionId) {
 }
 
 function stopTranslation() {
+  cancelPendingStarts()
   for (const id of Object.keys(live)) stopDirection(id)
 }
 
@@ -138,6 +165,7 @@ function onSessionEvent(directionId, name, payload) {
 }
 
 async function startDirection(directionId) {
+  const mine = epoch
   const direction = plan[directionId]
   // passthrough：不建会话、不采集、从不 enqueue，因此直通增益恒为 1.0
   if (direction.mode !== 'translate') return
@@ -173,6 +201,11 @@ async function startDirection(directionId) {
     session.close()
     throw err
   }
+  // 等 open 期间 li:stop / li:disconnect 作废了这次启动：别再去占采集设备
+  if (mine !== epoch) {
+    session.close()
+    return
+  }
   const capture = await startCapture(bridge.roles[direction.inputRole], (chunk) => {
     if (directionId === 'uplink') {
       forwardMicAudio({ muted: uplinkPaused, chunk, sink: (c) => session.sendAudio(c) })
@@ -180,6 +213,12 @@ async function startDirection(directionId) {
     }
     session.sendAudio(chunk)
   })
+  // startCapture 也是异步的：写 live 之前再比一次，否则旧会话被覆盖后永不 close
+  if (mine !== epoch) {
+    capture.stop()
+    session.close()
+    return
+  }
   live[directionId] = { session, capture }
 }
 
@@ -188,9 +227,14 @@ async function startTranslation(message) {
   server = message.server
   uplinkPaused = message.uplinkPaused === true
   const directions = {}
+  const mine = epoch
   try {
     for (const id of Object.keys(plan)) {
+      // 每轮开头与每次 await 之后都确认这次启动还算数：被作废就不得回 ok，
+      // 否则 SW 会把早已收尾的方向标成 running
+      if (mine !== epoch) throw CANCELLED
       await startDirection(id)
+      if (mine !== epoch) throw CANCELLED
       directions[id] = { status: 'running', mode: plan[id].mode }
     }
   } catch (err) {

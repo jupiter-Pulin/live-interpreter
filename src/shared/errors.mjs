@@ -21,6 +21,22 @@ export function messageFor(category) {
   return USER_MESSAGES[category] ?? USER_MESSAGES.api_error
 }
 
+// getUserMedia / setSinkId 抛出的 DOMException 只有 name，没有 category。
+// 不先按 name 归类就会被 classifyError 压成 api_error：用户看到「翻译服务返回了错误」
+// 而实际是没授权或设备不在，且 device_missing 才触发的 devicechange 重试永不发生。
+const MEDIA_ERROR_CATEGORIES = new Map([
+  ['NotAllowedError', 'permission_denied'],
+  ['SecurityError', 'permission_denied'],
+  ['NotFoundError', 'device_missing'],
+  ['OverconstrainedError', 'device_missing'],
+  ['NotReadableError', 'device_missing'],
+])
+
+// 认得的媒体异常名 → 分类；其它（含 undefined）返回 null，交回 classifyError 兜底
+export function classifyMediaError(name) {
+  return MEDIA_ERROR_CATEGORIES.get(name) ?? null
+}
+
 // 分类器：已带合法分类的对象原样归类，其余一律兜底为 api_error，绝不抛出
 export function classifyError(err) {
   if (err && typeof err.category === 'string' && CATEGORIES.includes(err.category)) {

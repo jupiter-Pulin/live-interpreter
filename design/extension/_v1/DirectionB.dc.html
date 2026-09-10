@@ -1,0 +1,64 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Patrick+Hand&amp;display=swap">
+  <style>
+    body { margin: 0; background: #f5f2ea; color: #2b2b2b; font-family: "Patrick Hand", "Comic Sans MS", "PingFang SC", "Hiragino Sans GB", sans-serif; }
+    a { color: #2f7cf6; text-decoration: none; }
+    a:hover { color: #1b5fd0; }
+  </style>
+</helmet>
+<div style="position: relative; width: 720px; height: 460px; background: #f5f2ea; overflow: hidden; display: flex; flex-direction: column; gap: 10px; padding: 16px; box-sizing: border-box;">
+
+  <div style="display: flex; align-items: baseline; gap: 10px;">
+    <div style="font-size: 20px;">方向 B · 字幕上屏</div>
+    <div style="font-size: 14px; color: #7a756b;">低保真备选 · 弹窗只留开关，文字盖在会议画面上</div>
+  </div>
+
+  <div style="position: relative; flex-grow: 1; border: 2px solid #2b2b2b; border-radius: 8px; background: #ffffff; display: flex; flex-direction: column; overflow: hidden;">
+    <div style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; border-bottom: 2px solid #2b2b2b;">
+      <div style="height: 20px; flex-grow: 1; max-width: 300px; border: 2px dashed #9a958a; border-radius: 10px;"></div>
+      <div style="flex-grow: 1;"></div>
+      <div style="width: 22px; height: 22px; border: 2px dashed #9a958a; border-radius: 4px;"></div>
+      <div style="width: 22px; height: 22px; border: 2px solid #2f7cf6; border-radius: 4px; background: rgba(47, 124, 246, 0.15);"></div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; flex-grow: 1; padding: 12px 12px 44px;">
+      <div style="border: 2px dashed #9a958a; border-radius: 8px;"></div>
+      <div style="border: 2px dashed #9a958a; border-radius: 8px;"></div>
+      <div style="border: 2px dashed #9a958a; border-radius: 8px;"></div>
+      <div style="border: 2px dashed #9a958a; border-radius: 8px;"></div>
+    </div>
+
+    <div style="position: absolute; left: 50%; bottom: 52px; transform: translateX(-50%); width: 440px; display: flex; flex-direction: column; gap: 2px; padding: 8px 14px; border: 2px solid #2f7cf6; border-radius: 8px; background: rgba(43, 43, 43, 0.9); color: #ffffff;">
+      <div style="font-size: 17px;">所以我们把这个实验再跑两周，然后再决定要不要全量</div>
+      <div style="font-size: 13px; color: #c9c4b8;">So we'll run the experiment for another two weeks before deciding on a full rollout.</div>
+    </div>
+
+    <div style="position: absolute; top: 40px; right: 10px; width: 190px; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 2px solid #2b2b2b; border-radius: 8px; background: #ffffff; box-shadow: 4px 4px 0 #2b2b2b;">
+      <div style="display: flex; align-items: center; justify-content: space-between; font-size: 15px;">
+        <span>会议同传</span>
+        <span style="width: 34px; height: 18px; border: 2px solid #2b2b2b; border-radius: 9px; display: flex; align-items: center; justify-content: flex-end; padding: 1px; box-sizing: border-box;"><span style="width: 12px; height: 12px; border-radius: 6px; background: #2b2b2b; display: block;"></span></span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px; font-size: 14px;">
+        <span style="width: 14px; height: 14px; border: 2px solid #2f7cf6; border-radius: 3px; background: #2f7cf6; display: flex; align-items: center; justify-content: center;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l4 4 10-10"></path></svg></span>
+        <span>字幕上屏</span>
+      </div>
+      <div style="font-size: 12px; color: #7a756b;">默认不勾选 · 会议画面干净</div>
+    </div>
+  </div>
+
+  <div style="display: flex; gap: 16px; font-size: 13px; color: #4a4640; line-height: 1.4;">
+    <div style="flex: 1 1 0;"><span style="color: #2f7cf6;">好处：</span>不用一直开着弹窗，边看画面边看字幕。</div>
+    <div style="flex: 1 1 0;"><span style="color: #c0392b;">代价：</span>文字出现在会议画面上，和「会议中不出现翻译字」的默认相反，必须默认关闭。</div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

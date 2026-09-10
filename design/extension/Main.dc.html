@@ -1,0 +1,196 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@500&amp;display=swap">
+  <style>
+    body { margin: 0; background: #17191d; color: #edeff3; font-family: "IBM Plex Sans", -apple-system, "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #4fd6b8; text-decoration: none; }
+    a:hover { color: #7fe3cc; }
+    button { font-family: inherit; cursor: pointer; }
+    .mono { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
+    @keyframes li-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    .live-dot { animation: li-pulse 1.4s ease-in-out infinite; }
+  </style>
+</helmet>
+<div style="width: 100%; min-height: 100vh; position: relative; display: flex; flex-direction: column; padding: 20px 20px 16px; box-sizing: border-box; background: {{ c.bg }}; color: {{ c.text }};">
+  <sc-if value="{{ anyMenuOpen }}" hint-placeholder-val="{{ false }}">
+    <button onClick="{{ closeMenus }}" style="position: absolute; left: 0; top: 0; right: 0; bottom: 0; z-index: 4; border: 0; padding: 0; background: transparent;"></button>
+  </sc-if>
+  <div style="display: flex; flex-direction: column; justify-content: space-between; gap: 24px; flex-grow: 1;">
+  <div style="display: flex; flex-direction: column; gap: 24px;">
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <div style="width: 36px; height: 36px; border-radius: 10px; background: {{ c.accentTint }}; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="{{ c.accent }}" stroke-width="2" stroke-linecap="round"><path d="M3 12h2"></path><path d="M8 8v8"></path><path d="M12 4v16"></path><path d="M16 8v8"></path><path d="M19 12h2"></path></svg></div>
+      <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
+        <div style="font-size: 15px; font-weight: 600;">会议同传</div>
+        <div style="font-size: 12px; color: {{ c.faint }};">Live Interpreter</div>
+      </div>
+    </div>
+    <div>
+    <sc-if value="{{ isOff }}" hint-placeholder-val="{{ true }}">
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <div style="font-size: 20px; font-weight: 600; letter-spacing: -0.01em;">同传已关闭</div>
+        <div style="font-size: 13px; line-height: 1.6; color: {{ c.muted }};">开启后，对方说的话会翻成你要听的语言进你的耳机，你说的话会翻译后送进会议。会议里的其他人不受影响。</div>
+      </div>
+    </sc-if>
+    <sc-if value="{{ isError }}" hint-placeholder-val="{{ false }}">
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <div style="font-size: 20px; font-weight: 600; letter-spacing: -0.01em; color: {{ c.danger }};">无法开启</div>
+        <div style="font-size: 13px; line-height: 1.6; color: {{ c.muted }};">没有检测到 BlackHole 16ch 虚拟麦克风。装好并在会议里把它选成麦克风后再开。</div>
+      </div>
+    </sc-if>
+    <sc-if value="{{ isOn }}" hint-placeholder-val="{{ false }}">
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <div style="display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 600; letter-spacing: -0.01em;"><span class="live-dot" style="width: 10px; height: 10px; border-radius: 5px; background: {{ c.accent }}; display: block; flex-shrink: 0;"></span><span>同传进行中</span></div>
+        <div style="font-size: 13px; line-height: 1.6; color: {{ c.muted }};">对方说的会翻成<sc-if value="{{ hear.zh }}" hint-placeholder-val="{{ true }}"><span>中文</span></sc-if><sc-if value="{{ hear.en }}" hint-placeholder-val="{{ false }}"><span>English</span></sc-if><sc-if value="{{ hear.ja }}" hint-placeholder-val="{{ false }}"><span>日本語</span></sc-if><sc-if value="{{ hear.ko }}" hint-placeholder-val="{{ false }}"><span>한국어</span></sc-if><sc-if value="{{ hear.es }}" hint-placeholder-val="{{ false }}"><span>Español</span></sc-if><sc-if value="{{ hear.fr }}" hint-placeholder-val="{{ false }}"><span>Français</span></sc-if>进你的耳机，你说的<sc-if value="{{ speak.zh }}" hint-placeholder-val="{{ true }}"><span>中文</span></sc-if><sc-if value="{{ speak.en }}" hint-placeholder-val="{{ false }}"><span>English</span></sc-if><sc-if value="{{ speak.ja }}" hint-placeholder-val="{{ false }}"><span>日本語</span></sc-if><sc-if value="{{ speak.ko }}" hint-placeholder-val="{{ false }}"><span>한국어</span></sc-if><sc-if value="{{ speak.es }}" hint-placeholder-val="{{ false }}"><span>Español</span></sc-if><sc-if value="{{ speak.fr }}" hint-placeholder-val="{{ false }}"><span>Français</span></sc-if>会翻译后送进会议。会议里的其他人不受影响。</div>
+      </div>
+    </sc-if>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 16px;">
+      <div style="position: relative; display: flex; flex-direction: column; gap: 6px;">
+        <div style="font-size: 12px; color: {{ c.muted }}; padding: 0 2px;">你说的语言</div>
+        <button onClick="{{ toggleSpeakMenu }}" style="display: flex; align-items: center; gap: 12px; height: 52px; padding: 0 16px; border-radius: 14px; border: 1px solid {{ speakField.border }}; background: {{ c.field }}; color: {{ c.text }}; text-align: left; width: 100%;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="{{ c.accent }}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;"><circle cx="9" cy="8" r="3.5"></circle><path d="M3 20a6 6 0 0 1 12 0"></path><path d="M16.5 8.5a4 4 0 0 1 0 5"></path><path d="M19.5 5.5a8 8 0 0 1 0 11"></path></svg>
+          <span style="flex-grow: 1; font-size: 15px; font-weight: 500;"><sc-if value="{{ speak.zh }}" hint-placeholder-val="{{ true }}"><span>中文</span></sc-if><sc-if value="{{ speak.en }}" hint-placeholder-val="{{ false }}"><span>English</span></sc-if><sc-if value="{{ speak.ja }}" hint-placeholder-val="{{ false }}"><span>日本語</span></sc-if><sc-if value="{{ speak.ko }}" hint-placeholder-val="{{ false }}"><span>한국어</span></sc-if><sc-if value="{{ speak.es }}" hint-placeholder-val="{{ false }}"><span>Español</span></sc-if><sc-if value="{{ speak.fr }}" hint-placeholder-val="{{ false }}"><span>Français</span></sc-if></span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="{{ c.muted }}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform: {{ speakField.chevron }}; flex-shrink: 0;"><path d="M6 9l6 6 6-6"></path></svg>
+        </button>
+        <div style="position: absolute; top: 100%; left: 0; right: 0; margin-top: 6px; z-index: 5;">
+        <sc-if value="{{ speakMenuOpen }}" hint-placeholder-val="{{ false }}">
+          <div style="display: flex; flex-direction: column; gap: 2px; padding: 6px; border-radius: 14px; background: {{ c.menu }}; border: 1px solid {{ c.border }}; box-shadow: 0 12px 32px {{ c.shadow }};">
+          <button onClick="{{ pickSpeak.zh }}" style="display: flex; align-items: center; justify-content: space-between; height: 36px; padding: 0 12px; border-radius: 10px; border: 0; background: {{ speakOpt.zh }}; color: {{ c.text }}; font-size: 14px; text-align: left; width: 100%;">
+            <span>中文</span>
+            <sc-if value="{{ speak.zh }}" hint-placeholder-val="{{ true }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{ c.accent }}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l4 4 10-10"></path></svg></sc-if>
+          </button>
+          <button onClick="{{ pickSpeak.en }}" style="display: flex; align-items: center; justify-content: space-between; height: 36px; padding: 0 12px; border-radius: 10px; border: 0; background: {{ speakOpt.en }}; color: {{ c.text }}; font-size: 14px; text-align: left; width: 100%;">
+            <span>English</span>
+            <sc-if value="{{ speak.en }}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{ c.accent }}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l4 4 10-10"></path></svg></sc-if>
+          </button>
+          <button onClick="{{ pickSpeak.ja }}" style="display: flex; align-items: center; justify-content: space-between; height: 36px; padding: 0 12px; border-radius: 10px; border: 0; background: {{ speakOpt.ja }}; color: {{ c.text }}; font-size: 14px; text-align: left; width: 100%;">
+            <span>日本語</span>
+            <sc-if value="{{ speak.ja }}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{ c.accent }}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l4 4 10-10"></path></svg></sc-if>
+          </button>
+          <button onClick="{{ pickSpeak.ko }}" style="display: flex; align-items: center; justify-content: space-between; height: 36px; padding: 0 12px; border-radius: 10px; border: 0; background: {{ speakOpt.ko }}; color: {{ c.text }}; font-size: 14px; text-align: left; width: 100%;">
+            <span>한국어</span>
+            <sc-if value="{{ speak.ko }}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{ c.accent }}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l4 4 10-10"></path></svg></sc-if>
+          </button>
+          <button onClick="{{ pickSpeak.es }}" style="display: flex; align-items: center; justify-content: space-between; height: 36px; padding: 0 12px; border-radius: 10px; border: 0; background: {{ speakOpt.es }}; color: {{ c.text }}; font-size: 14px; text-align: left; width: 100%;">
+            <span>Español</span>
+            <sc-if value="{{ speak.es }}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{ c.accent }}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l4 4 10-10"></path></svg></sc-if>
+          </button>
+          <button onClick="{{ pickSpeak.fr }}" style="display: flex; align-items: center; justify-content: space-between; height: 36px; padding: 0 12px; border-radius: 10px; border: 0; background: {{ speakOpt.fr }}; color: {{ c.text }}; font-size: 14px; text-align: left; width: 100%;">
+            <span>Français</span>
+            <sc-if value="{{ speak.fr }}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{ c.accent }}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l4 4 10-10"></path></svg></sc-if>
+          </button>
+          </div>
+        </sc-if>
+        </div>
+      </div>
+      <div style="position: relative; display: flex; flex-direction: column; gap: 6px;">
+        <div style="font-size: 12px; color: {{ c.muted }}; padding: 0 2px;">你想听的语言</div>
+        <button onClick="{{ toggleHearMenu }}" style="display: flex; align-items: center; gap: 12px; height: 52px; padding: 0 16px; border-radius: 14px; border: 1px solid {{ hearField.border }}; background: {{ c.field }}; color: {{ c.text }}; text-align: left; width: 100%;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="{{ c.accent }}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;"><path d="M6.5 10a5.5 5.5 0 0 1 11 0c0 3-2.5 3.5-3.5 6s-1.5 4.5-4 4.5"></path><path d="M9.5 10a2.5 2.5 0 0 1 5 0c0 1.5-1.5 2-2 3.5"></path></svg>
+          <span style="flex-grow: 1; font-size: 15px; font-weight: 500;"><sc-if value="{{ hear.zh }}" hint-placeholder-val="{{ true }}"><span>中文</span></sc-if><sc-if value="{{ hear.en }}" hint-placeholder-val="{{ false }}"><span>English</span></sc-if><sc-if value="{{ hear.ja }}" hint-placeholder-val="{{ false }}"><span>日本語</span></sc-if><sc-if value="{{ hear.ko }}" hint-placeholder-val="{{ false }}"><span>한국어</span></sc-if><sc-if value="{{ hear.es }}" hint-placeholder-val="{{ false }}"><span>Español</span></sc-if><sc-if value="{{ hear.fr }}" hint-placeholder-val="{{ false }}"><span>Français</span></sc-if></span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="{{ c.muted }}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform: {{ hearField.chevron }}; flex-shrink: 0;"><path d="M6 9l6 6 6-6"></path></svg>
+        </button>
+        <div style="position: absolute; top: 100%; left: 0; right: 0; margin-top: 6px; z-index: 5;">
+        <sc-if value="{{ hearMenuOpen }}" hint-placeholder-val="{{ false }}">
+          <div style="display: flex; flex-direction: column; gap: 2px; padding: 6px; border-radius: 14px; background: {{ c.menu }}; border: 1px solid {{ c.border }}; box-shadow: 0 12px 32px {{ c.shadow }};">
+          <button onClick="{{ pickHear.zh }}" style="display: flex; align-items: center; justify-content: space-between; height: 36px; padding: 0 12px; border-radius: 10px; border: 0; background: {{ hearOpt.zh }}; color: {{ c.text }}; font-size: 14px; text-align: left; width: 100%;">
+            <span>中文</span>
+            <sc-if value="{{ hear.zh }}" hint-placeholder-val="{{ true }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{ c.accent }}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l4 4 10-10"></path></svg></sc-if>
+          </button>
+          <button onClick="{{ pickHear.en }}" style="display: flex; align-items: center; justify-content: space-between; height: 36px; padding: 0 12px; border-radius: 10px; border: 0; background: {{ hearOpt.en }}; color: {{ c.text }}; font-size: 14px; text-align: left; width: 100%;">
+            <span>English</span>
+            <sc-if value="{{ hear.en }}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{ c.accent }}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l4 4 10-10"></path></svg></sc-if>
+          </button>
+          <button onClick="{{ pickHear.ja }}" style="display: flex; align-items: center; justify-content: space-between; height: 36px; padding: 0 12px; border-radius: 10px; border: 0; background: {{ hearOpt.ja }}; color: {{ c.text }}; font-size: 14px; text-align: left; width: 100%;">
+            <span>日本語</span>
+            <sc-if value="{{ hear.ja }}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{ c.accent }}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l4 4 10-10"></path></svg></sc-if>
+          </button>
+          <button onClick="{{ pickHear.ko }}" style="display: flex; align-items: center; justify-content: space-between; height: 36px; padding: 0 12px; border-radius: 10px; border: 0; background: {{ hearOpt.ko }}; color: {{ c.text }}; font-size: 14px; text-align: left; width: 100%;">
+            <span>한국어</span>
+            <sc-if value="{{ hear.ko }}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{ c.accent }}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l4 4 10-10"></path></svg></sc-if>
+          </button>
+          <button onClick="{{ pickHear.es }}" style="display: flex; align-items: center; justify-content: space-between; height: 36px; padding: 0 12px; border-radius: 10px; border: 0; background: {{ hearOpt.es }}; color: {{ c.text }}; font-size: 14px; text-align: left; width: 100%;">
+            <span>Español</span>
+            <sc-if value="{{ hear.es }}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{ c.accent }}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l4 4 10-10"></path></svg></sc-if>
+          </button>
+          <button onClick="{{ pickHear.fr }}" style="display: flex; align-items: center; justify-content: space-between; height: 36px; padding: 0 12px; border-radius: 10px; border: 0; background: {{ hearOpt.fr }}; color: {{ c.text }}; font-size: 14px; text-align: left; width: 100%;">
+            <span>Français</span>
+            <sc-if value="{{ hear.fr }}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{ c.accent }}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l4 4 10-10"></path></svg></sc-if>
+          </button>
+          </div>
+        </sc-if>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 10px;">
+    <div>
+    <sc-if value="{{ isOn }}" hint-placeholder-val="{{ false }}">
+      <button onClick="{{ togglePower }}" style="height: 48px; border-radius: 24px; border: 1px solid {{ c.border }}; background: transparent; color: {{ c.text }}; font-size: 15px; font-weight: 500; width: 100%;">关闭同传</button>
+    </sc-if>
+    <sc-if value="{{ notOn }}" hint-placeholder-val="{{ true }}">
+      <button onClick="{{ togglePower }}" style="height: 48px; border-radius: 24px; border: 0; background: {{ c.accent }}; color: {{ c.onAccent }}; font-size: 15px; font-weight: 600; width: 100%;">开启同传</button>
+    </sc-if>
+    </div>
+    <div style="font-size: 12px; line-height: 1.5; color: {{ c.faint }}; text-align: center;">开启时会在本机启动翻译服务，对话会多一到两秒延迟。</div>
+  </div>
+  </div>
+</div>
+</x-dc>
+<script data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark","section":"Look"},"deviceMissing":{"editor":"boolean","default":false,"section":"Demo"},"$preview":{"width":380,"height":600}}'>
+const LANG_IDS = ['zh', 'en', 'ja', 'ko', 'es', 'fr'];
+const THEMES = {
+  dark: { bg: '#17191d', field: '#1f2228', menu: '#22252b', border: '#2e323a', text: '#edeff3', muted: '#9aa3b0', faint: '#6b7380', accent: '#4fd6b8', accentTint: 'rgba(79, 214, 184, 0.14)', onAccent: '#0e0f12', danger: '#f07a68', shadow: 'rgba(0, 0, 0, 0.5)', optSelected: 'rgba(79, 214, 184, 0.12)' },
+  light: { bg: '#ffffff', field: '#f3f4f6', menu: '#ffffff', border: '#d9dce2', text: '#1b1d22', muted: '#5d6572', faint: '#8a919c', accent: '#0f9b7f', accentTint: 'rgba(15, 155, 127, 0.12)', onAccent: '#ffffff', danger: '#c8422f', shadow: 'rgba(0, 0, 0, 0.15)', optSelected: 'rgba(15, 155, 127, 0.10)' }
+};
+class Component extends DCLogic {
+  renderVals() {
+    const s = this.state || {};
+    const c = THEMES[this.props.theme === 'light' ? 'light' : 'dark'];
+    const deviceMissing = !!this.props.deviceMissing;
+    const power = !!s.power;
+    const error = !!s.error && !power;
+    const menu = s.menu || null;
+    const speak = s.speak || 'zh';
+    const hear = s.hear || 'zh';
+    const flags = (sel) => { const o = {}; for (const id of LANG_IDS) o[id] = sel === id; return o; };
+    const optBg = (sel) => { const o = {}; for (const id of LANG_IDS) o[id] = sel === id ? c.optSelected : 'transparent'; return o; };
+    const pickers = (key) => { const o = {}; for (const id of LANG_IDS) o[id] = () => { const p = { menu: null }; p[key] = id; this.setState(p); }; return o; };
+    return {
+      c: c,
+      isOn: power,
+      notOn: !power,
+      isOff: !power && !error,
+      isError: error,
+      speak: flags(speak),
+      hear: flags(hear),
+      speakMenuOpen: menu === 'speak',
+      hearMenuOpen: menu === 'hear',
+      anyMenuOpen: menu !== null,
+      speakField: { border: menu === 'speak' ? c.accent : c.border, chevron: menu === 'speak' ? 'rotate(180deg)' : 'rotate(0deg)' },
+      hearField: { border: menu === 'hear' ? c.accent : c.border, chevron: menu === 'hear' ? 'rotate(180deg)' : 'rotate(0deg)' },
+      speakOpt: optBg(speak),
+      hearOpt: optBg(hear),
+      pickSpeak: pickers('speak'),
+      pickHear: pickers('hear'),
+      toggleSpeakMenu: () => this.setState({ menu: menu === 'speak' ? null : 'speak' }),
+      toggleHearMenu: () => this.setState({ menu: menu === 'hear' ? null : 'hear' }),
+      closeMenus: () => this.setState({ menu: null }),
+      togglePower: () => {
+        if (power) this.setState({ power: false, error: false, menu: null });
+        else if (deviceMissing) this.setState({ error: true, menu: null });
+        else this.setState({ power: true, error: false, menu: null });
+      }
+    };
+  }
+}
+</script>
+</body>
+</html>

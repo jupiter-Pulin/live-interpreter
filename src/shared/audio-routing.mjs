@@ -24,3 +24,19 @@ export function buildCaptureConstraints(deviceId) {
     },
   }
 }
+
+// 直通（音频桥）约束：BlackHole 截获路与采集同规则（三项处理全关，不破坏会议音频）；
+// 真麦克风路开回声消除与降噪（用户外放时减少回声进会议），但仍关自动增益避免忽大忽小。
+export function buildFloorConstraints(deviceId, inputRole) {
+  if (inputRole === 'mic') {
+    return {
+      audio: {
+        deviceId: { exact: deviceId },
+        echoCancellation: true,
+        autoGainControl: false,
+        noiseSuppression: true,
+      },
+    }
+  }
+  return buildCaptureConstraints(deviceId)
+}

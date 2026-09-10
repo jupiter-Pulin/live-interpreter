@@ -1,4 +1,11 @@
-export const CATEGORIES = ['device_missing', 'permission_denied', 'network_unavailable', 'api_error', 'config_missing']
+export const CATEGORIES = [
+  'device_missing',
+  'permission_denied',
+  'network_unavailable',
+  'api_error',
+  'config_missing',
+  'host_unavailable',
+]
 
 export const USER_MESSAGES = {
   device_missing: '可用音频设备不满足要求：请检查 BlackHole 与耳机/麦克风的安装与选择。',
@@ -6,6 +13,8 @@ export const USER_MESSAGES = {
   network_unavailable: '网络连接不可用或已中断，请检查网络后重试。',
   api_error: '翻译服务返回了错误，请稍后重试。',
   config_missing: '缺少必要配置：请在服务端设置 OPENAI_API_KEY 环境变量后重启服务。',
+  host_unavailable:
+    '本地翻译服务不可用：请在项目目录运行 npm run install:host 完成安装后重试（升级 Node 后需重新运行）。',
 }
 
 export function messageFor(category) {

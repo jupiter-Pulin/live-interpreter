@@ -23,6 +23,31 @@ test('AC-030 selectSessionEndpoint：mock 分支绝不产出 token 路径', () =
   assert.equal(r.path, '/api/session-token')
 })
 
+test('AC-124 selectSessionEndpoint 第二参：宿主 baseUrl 与启动令牌', () => {
+  // 单参调用保持网页时代形态：url 与 path 相同且为相对路径
+  const bare = selectSessionEndpoint({ backend: 'real' })
+  assert.equal(bare.url, '/api/session-token')
+  assert.equal(bare.url, bare.path)
+  assert.equal(bare.headers, undefined, '没有启动令牌时不产出 headers')
+
+  const full = selectSessionEndpoint({ backend: 'real' }, { baseUrl: 'http://127.0.0.1:4321', launchToken: 't' })
+  assert.equal(full.url, 'http://127.0.0.1:4321/api/session-token')
+  assert.equal(full.headers.Authorization, 'Bearer t')
+
+  // mock 分支带同样第二参仍不得产出 token 路径与 headers
+  const mock = selectSessionEndpoint(
+    { backend: 'mock', mockWsUrl: 'ws://127.0.0.1:1234' },
+    { baseUrl: 'http://127.0.0.1:4321', launchToken: 't' }
+  )
+  assert.equal(mock.kind, 'mock-ws')
+  assert.equal(mock.url, 'ws://127.0.0.1:1234')
+  assert.equal(mock.headers, undefined)
+  const json = JSON.stringify(mock)
+  assert.ok(!json.includes('/api/session-token'))
+  assert.ok(!json.includes('headers'))
+  assert.ok(!json.includes('Bearer'), 'mock 分支绝不携带启动令牌')
+})
+
 test('AC-013 字幕缓冲：拼接 → 固化 → 新行不污染历史', () => {
   const s = createSubtitles()
   assert.equal(s.getCurrentLine(), '')

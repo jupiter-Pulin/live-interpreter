@@ -14,7 +14,7 @@ function once(session, eventName, timeoutMs = 5000) {
   })
 }
 
-// 与 src/web/session.js 的字幕接线一致：每个方向的会话只拿到该方向的字幕缓冲
+// 与 src/extension/session.js 的字幕接线一致：每个方向的会话只拿到该方向的字幕缓冲
 function wire(session, subtitles, directionId) {
   const buffer = subtitles.for(directionId)
   session.on('subtitle-delta', ({ text }) => buffer.appendDelta(text))

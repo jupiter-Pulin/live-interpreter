@@ -2,8 +2,6 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { startMockRealtime } from '../../src/server/mock-realtime.mjs'
 import { createSession } from '../../src/shared/session-protocol.mjs'
-import { createServer } from '../../src/server/index.mjs'
-import { selectSessionEndpoint } from '../../src/shared/session-endpoint.mjs'
 
 // 记录型包装器：底层真正建连，同时记录每次被请求的 URL
 function makeRecordingWS() {
@@ -27,7 +25,7 @@ function once(session, eventName, timeoutMs = 5000) {
   })
 }
 
-test('AC-009 mock 全链路：字幕 + 音频帧 + 无外呼 + config 衔接守卫', async () => {
+test('AC-009 mock 全链路：字幕 + 音频帧 + 无外呼', async () => {
   const mock = await startMockRealtime({ port: 0 })
   const { RecordingWS, urls } = makeRecordingWS()
   const sinkBytes = []
@@ -52,27 +50,7 @@ test('AC-009 mock 全链路：字幕 + 音频帧 + 无外呼 + config 衔接守�
   assert.ok(urls.every((u) => u.startsWith('ws://127.0.0.1')))
   assert.ok(!urls.some((u) => u.includes('api.openai.com')))
   session.close()
-
-  // 服务端衔接守卫：GET /api/config 的真实响应体喂给 selectSessionEndpoint
-  const server = createServer({
-    backend: 'mock',
-    mockWsUrl: mock.url,
-    apiKey: undefined,
-    exchangeToken: () => {
-      throw new Error('mock 后端下不得调用 exchangeToken')
-    },
-  })
-  await new Promise((r) => server.listen(0, r))
-  const port = server.address().port
-  const res = await fetch(`http://127.0.0.1:${port}/api/config`)
-  assert.ok(res.ok)
-  const body = await res.json()
-  assert.deepEqual(body, { backend: 'mock', mockWsUrl: mock.url })
-  const endpoint = selectSessionEndpoint(body)
-  assert.equal(endpoint.kind, 'mock-ws')
-  assert.equal(endpoint.url, mock.url)
-  assert.ok(!JSON.stringify(endpoint).includes('/api/session-token'))
-  await new Promise((r) => server.close(r))
+  // 服务端衔接守卫已移到 native-host.test.mjs：以宿主的 ready 帧喂 selectSessionEndpoint
   await mock.stop()
 })
 

@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
-const AUDIO_JS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../src/web/audio.js')
+const AUDIO_JS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../src/extension/audio.js')
 
 test('AC-003 audio.js 权限探测分支：唯一依据是导入的 needsPermissionProbe', async () => {
   const src = await readFile(AUDIO_JS, 'utf8')

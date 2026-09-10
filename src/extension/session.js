@@ -6,16 +6,25 @@ import { DIRECTIONS } from '/shared/directions.mjs'
 
 const REAL_WS_URL = 'wss://api.openai.com/v1/realtime/translations?model=gpt-realtime-translate'
 
-export async function openTranslationSession({ endpoint, directionId, audioSink, subtitles, latency, onEvent }) {
+export async function openTranslationSession({
+  endpoint,
+  directionId,
+  audioSink,
+  subtitles,
+  latency,
+  onEvent,
+  directionTable = DIRECTIONS,
+}) {
   let url = null
   let protocols
   if (endpoint.kind === 'mock-ws') {
     url = endpoint.url
   } else {
-    const res = await fetch(endpoint.path, {
+    // 扩展里端点是绝对地址并带启动令牌；网页时代的相对路径形态仍然兼容
+    const res = await fetch(endpoint.url ?? endpoint.path, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ targetLanguage: DIRECTIONS[directionId].target }),
+      headers: { 'Content-Type': 'application/json', ...(endpoint.headers ?? {}) },
+      body: JSON.stringify({ targetLanguage: directionTable[directionId].target }),
     })
     const body = await res.json()
     if (!res.ok) {
@@ -32,6 +41,7 @@ export async function openTranslationSession({ endpoint, directionId, audioSink,
     protocols,
     audioSink,
     directionId,
+    directionTable,
   })
 
   // 延迟口径：该句首个 subtitle-delta 之前的最后一次 sendAudio → 首帧译文音频

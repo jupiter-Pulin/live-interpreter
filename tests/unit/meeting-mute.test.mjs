@@ -44,6 +44,43 @@ test('AC-130 aria-label 兜底：Meet 改版丢了图标连字时仍能判定', 
   assert.equal(parseMeetMuteState({ buttons: [{ dataIsMuted: 'false', text: '', ariaLabel: '关闭麦克风' }] }), false)
 })
 
+test('AC-130 图标连字整表优先于 aria 兜底：参会者磁贴不得抢答真麦克风按钮', () => {
+  // 参会者行/磁贴也带 data-is-muted，aria-label 里还含 microphone；逐按钮混合匹配时
+  // 它排在真麦克风按钮之前就会抢答，远端有人静音即静默暂停我们的上行
+  assert.equal(
+    parseMeetMuteState({
+      buttons: [
+        { dataIsMuted: 'true', text: '', ariaLabel: 'Zhang San microphone' },
+        { dataIsMuted: 'false', text: 'mic' },
+      ],
+    }),
+    false
+  )
+  // 其它语言的参会者标签同样不得抢答
+  for (const aria of ['张三 麦克风', '参加者のマイク', '참가자 마이크']) {
+    assert.equal(
+      parseMeetMuteState({
+        buttons: [
+          { dataIsMuted: 'true', text: '', ariaLabel: aria },
+          { dataIsMuted: 'false', text: 'mic_off' },
+        ],
+      }),
+      false,
+      `aria「${aria}」不得盖过图标连字按钮`
+    )
+  }
+  // 图标连字一个都不命中时才轮到 aria 兜底
+  assert.equal(
+    parseMeetMuteState({
+      buttons: [
+        { dataIsMuted: 'false', text: 'videocam' },
+        { dataIsMuted: 'true', text: '', ariaLabel: 'Turn on microphone' },
+      ],
+    }),
+    true
+  )
+})
+
 test('AC-130 resolveMeetingMuted：多个会议标签取最近上报，移除后回落', () => {
   assert.equal(resolveMeetingMuted([]), null)
   assert.equal(resolveMeetingMuted(), null)

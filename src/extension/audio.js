@@ -66,6 +66,11 @@ export async function createPlayer(sinkId, { onPlaybackError, floorLevel = FLOOR
     }
   })
   let playhead = 0
+  // 队列里是否有过译文。playhead 的释放窗口判定要跟 ctx.currentTime 比，而上下文创建后的
+  // 头 FLOOR_RELEASE_MS 里 currentTime 本身就小于 0.7——此时归零的 playhead 会让
+  // isTranslating 误判「正在播译文」，把刚建好的直通（attachFloor）和刚清空的队列（flush）
+  // 无故压低。这面旗子只表达「队列空了」，不参与任何增益计算。
+  let queued = false
   // 直通（音频桥）：输入设备 → floorGain → 已 setSinkId 的 destination。
   // 译文通过同一个 destination 混入；衬底只动 floorGain，绝不断开直通路。
   const floorGain = ctx.createGain()
@@ -80,7 +85,7 @@ export async function createPlayer(sinkId, { onPlaybackError, floorLevel = FLOOR
   // 目标增益只由 shared 的 floorTarget/isTranslating 决定，此处只负责平滑过渡
   function scheduleFloor() {
     const now = ctx.currentTime
-    const translating = isTranslating({ now, playhead, releaseMs: FLOOR_RELEASE_MS })
+    const translating = queued && isTranslating({ now, playhead, releaseMs: FLOOR_RELEASE_MS })
     const target = floorTarget({ translating, holdFull, level })
     const gain = floorGain.gain
     const current = gain.value
@@ -119,6 +124,7 @@ export async function createPlayer(sinkId, { onPlaybackError, floorLevel = FLOOR
         const startAt = Math.max(ctx.currentTime, playhead)
         src.start(startAt)
         playhead = startAt + buffer.duration
+        queued = true
         scheduled.add(src)
         src.onended = () => scheduled.delete(src)
         scheduleFloor()
@@ -137,6 +143,7 @@ export async function createPlayer(sinkId, { onPlaybackError, floorLevel = FLOOR
       }
       scheduled.clear()
       playhead = 0
+      queued = false
       scheduleFloor()
     },
     attachFloor(stream) {

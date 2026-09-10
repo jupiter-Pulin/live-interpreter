@@ -101,9 +101,9 @@ view.disconnect.addEventListener('click', () => send({ type: 'li:disconnect' }))
 view.hint.addEventListener('click', () => chrome.runtime.openOptionsPage())
 el('settings').addEventListener('click', () => chrome.runtime.openOptionsPage())
 
-el('dock').addEventListener('click', async () => {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-  await chrome.sidePanel.open({ tabId: tab.id })
+el('dock').addEventListener('click', () => {
+  // 必须同步调用：sidePanel.open 需要用户手势，放在 await 之后手势已经过期
+  chrome.sidePanel.open({ windowId: chrome.windows.WINDOW_ID_CURRENT })?.catch(() => {})
   window.close()
 })
 

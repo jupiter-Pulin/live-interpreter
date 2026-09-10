@@ -36,7 +36,8 @@ function report(buttons) {
   if (snapshot === lastSnapshot) return
   lastSnapshot = snapshot
   try {
-    chrome.runtime.sendMessage({ type: 'li:meeting-mute', to: 'sw', platform: 'meet', buttons })
+    // SW 不 sendResponse，返回的 Promise 必须接住：否则每次上报都留一个 unhandled rejection
+    chrome.runtime.sendMessage({ type: 'li:meeting-mute', to: 'sw', platform: 'meet', buttons })?.catch(() => {})
   } catch {
     // 扩展被重载时端口失效，下一次变化再报
   }

@@ -1,0 +1,56 @@
+{
+  "manifest_version": 3,
+  "name": "会议同传 Live Interpreter",
+  "description": "会议里一键开启双向同传：原声直通不断声，翻译叠在原声上；在 Google Meet 静音时自动暂停翻译你的话。",
+  "version": "0.1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtikaJqlbR1IZo14YltIG2Vjg0dAI85Mcnm+yx0qpPylSQMN8C6Gf/9mp6GodDW1q4aAeArYmdAPKdGCSAQLGAdzQyaIZtvz4gE3dlrmRoHeavz2TsfYIlRyCpbiCJ8dqqwprjMY/w3w3qKdcFaXJZFvBJb0X68haTgsjGecksMA3mzQM8TXR4cJrbGZs1QYmUfYpNJTDxz2CpaO/VNMK5eUJltLnGVZqIkohK6Q/v7PIJ/l/vPw7ThaiOgQlSCl9qCsoLLP5CUh3CI6+2RMLVQtHDKDJkO2pqWeod/550Nn5hcw6ccXcokm/C+GjA+4aC3hon9uCF7+orJUkQBA0DwIDAQAB",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "offscreen",
+    "nativeMessaging",
+    "storage",
+    "sidePanel",
+    "notifications"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "会议同传",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://meet.google.com/*"
+      ],
+      "js": [
+        "meet-mute.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

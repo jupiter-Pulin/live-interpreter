@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>会议同传 · 设置</title>
+    <link rel="stylesheet" href="panel.css" />
+    <style>
+      body {
+        width: auto;
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 32px 24px 48px;
+      }
+      h1 {
+        font-size: 20px;
+        font-weight: 600;
+        margin: 0;
+      }
+      h2 {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--faint);
+        letter-spacing: 0.04em;
+        margin: 0 0 10px;
+      }
+      section {
+        margin-top: 28px;
+      }
+      .card {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 12px 14px;
+        border-radius: 12px;
+        background: var(--field);
+        border: 1px solid var(--border);
+        margin-bottom: 8px;
+      }
+      .card .meta {
+        flex-grow: 1;
+        min-width: 0;
+      }
+      .card .name {
+        font-size: 13px;
+        font-weight: 500;
+      }
+      .card .hint {
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 2px;
+      }
+      .card select {
+        width: 260px;
+        height: 38px;
+        padding: 0 12px;
+        border-radius: 10px;
+        font-size: 13px;
+        font-weight: 400;
+        flex-shrink: 0;
+      }
+      .conclusion {
+        font-size: 13px;
+        line-height: 1.6;
+        padding: 12px 14px;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        background: var(--field);
+        color: var(--muted);
+      }
+      .conclusion[data-tone='ok'] {
+        border-color: var(--accent);
+        color: var(--text);
+      }
+      .conclusion[data-tone='bad'] {
+        border-color: var(--danger);
+        color: var(--danger);
+      }
+      .choices {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .choice {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .note {
+        font-size: 12px;
+        line-height: 1.6;
+        color: var(--faint);
+        margin-top: 10px;
+      }
+      .action {
+        height: 38px;
+        padding: 0 16px;
+        border-radius: 19px;
+        border: 1px solid var(--border);
+        background: transparent;
+        color: var(--text);
+        font: inherit;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .action:hover {
+        border-color: var(--accent);
+      }
+      ul {
+        margin: 8px 0 0;
+        padding-left: 20px;
+        font-size: 13px;
+        line-height: 1.8;
+        color: var(--muted);
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        background: var(--field);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        padding: 1px 5px;
+      }
+    </style>
+  </head>
+  <body data-surface="options">
+    <h1>会议同传 · 设置</h1>
+    <div class="note">第一次使用需要两块 BlackHole 虚拟声卡，并在「音频 MIDI 设置」里建好多输出设备。</div>
+
+    <section>
+      <h2>设备角色</h2>
+      <div id="devices"></div>
+      <div class="conclusion" id="conclusion"></div>
+      <div class="note">
+        打开本页即会请求麦克风权限；授权后才能看到设备名称。改动即时保存，下次「开启同传」生效。
+      </div>
+    </section>
+
+    <section>
+      <h2>同传时原声衬底</h2>
+      <div class="choices" id="floor"></div>
+      <div class="note" id="floor-note"></div>
+    </section>
+
+    <section>
+      <h2>本地翻译服务</h2>
+      <button class="action" id="probe" type="button">检测本地服务</button>
+      <div class="conclusion" id="probe-result" style="margin-top: 10px" hidden></div>
+      <div class="note">
+        本地服务只在同传开启期间存在，关闭同传即退出。首次使用请在项目目录运行
+        <code>npm run install:host</code>；升级 Node 后需要重新运行一次。
+      </div>
+    </section>
+
+    <section>
+      <h2>会议静音</h2>
+      <div class="note">在 Google Meet 里静音时会自动暂停翻译你的话；其它会议平台暂不支持感知静音。</div>
+    </section>
+
+    <section>
+      <h2>限制与建议</h2>
+      <ul>
+        <li>输入语言由模型自动识别，因此没有「你说的语言」这一项。</li>
+        <li>当你说的话已经是「对方听的语言」时，模型可能不出声——此时对方听到的是你 100% 的原声。</li>
+        <li>译文比原声晚一到两秒，所以每句开头会先听到一小段未压低的原声。</li>
+        <li>建议戴耳机：外放时你的麦克风会把对方的声音再送回会议，容易产生回声。</li>
+      </ul>
+    </section>
+
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

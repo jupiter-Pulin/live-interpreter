@@ -1,5 +1,5 @@
 // 语言目录：上游 gpt-realtime-translate 的 13 种输出语言 + 「原声（不翻译）」。
-// 输入语言由上游自动识别，本目录只描述输出端，因此没有「你说的语言」。
+// 输入语言由上游自动识别，本目录只描述输出端，因此界面不让用户声明自己说什么。
 // 所有界面上的语言标签都从这里取，接线层不得出现语言码或标签字面量。
 
 export const OUTPUT_LANGUAGES = [
@@ -20,6 +20,13 @@ export const OUTPUT_LANGUAGES = [
 
 export const ORIGINAL = 'original'
 export const ORIGINAL_LABEL = '原声（不翻译）'
+
+// 下拉的完整选项：13 种输出语言，然后（以分隔线隔开）「原声」。
+// 面板只按这张表渲染，选项数量与顺序的真值在这里。
+export const TARGET_CHOICES = [
+  ...OUTPUT_LANGUAGES.map((language) => ({ ...language, separated: false })),
+  { id: ORIGINAL, label: ORIGINAL_LABEL, separated: true },
+]
 
 const BY_ID = new Map(OUTPUT_LANGUAGES.map((l) => [l.id, l.label]))
 

@@ -287,3 +287,169 @@ test('AC-072 消息纪律：每条消息带 to，非己方消息返回 false', a
     }
   }
 })
+
+// ---------------------------------------------------------------- 面板与选项页
+
+const UI_FILES = ['panel.js', 'options.js']
+
+// 「panel.js 或其模板」= 面板脚本 + 两个 HTML + 它直接 import 的 shared 模块
+async function panelSurface() {
+  const parts = await Promise.all([
+    read('panel.js'),
+    read('popup.html'),
+    read('sidepanel.html'),
+    readFile(path.join(EXT, '..', 'shared', 'runtime-state.mjs'), 'utf8'),
+    readFile(path.join(EXT, '..', 'shared', 'languages.mjs'), 'utf8'),
+  ])
+  return parts.join('\n')
+}
+
+test('AC-106 面板只渲染 storage，不做状态判定也不碰设备', async () => {
+  const src = await read('panel.js')
+  for (const forbidden of ['getUserMedia', 'enumerateDevices', 'connectNative', 'chrome.offscreen', 'chrome.notifications']) {
+    assert.ok(!src.includes(forbidden), `panel.js 不得出现 ${forbidden}`)
+  }
+  for (const field of ['meetingMuted', 'bridge', 'startStep']) {
+    assert.ok(!new RegExp(`\\b${field}\\b`).test(src), `panel.js 不得对 ${field} 做任何判定`)
+  }
+  assert.ok(/statusCopy\(\{ \.\.\.runtime/.test(src), '文案、按钮、步骤、可见性全部来自 statusCopy')
+  assert.ok(/chrome\.storage\.onChanged\.addListener/.test(src), '必须靠 storage.onChanged 刷新')
+  assert.ok(/chrome\.storage\.local\.get\('settings'\)/.test(src) && /chrome\.storage\.session\.get\('runtime'\)/.test(src))
+  // 面板只发消息，不自己动手
+  const sends = [...src.matchAll(/type: '(li:[a-z-]+)'/g)].map((m) => m[1])
+  assert.deepEqual(new Set(sends), new Set(['li:power', 'li:disconnect', 'li:set-settings']), `面板只允许发这三种消息：${sends}`)
+  assert.ok(!sends.includes('li:connect'), 'UI 层没有只建桥不翻译的入口')
+})
+
+test('AC-136 UI 层不得存在「只建桥不翻译」的入口', async () => {
+  for (const file of UI_FILES) {
+    const src = await read(file)
+    assert.ok(!src.includes('li:connect'), `${file} 不得发送 li:connect`)
+    assert.ok(!src.includes('li:start'), `${file} 不得发送 li:start`)
+  }
+})
+
+test('AC-126 弹窗与侧栏只加载 panel.js 与 panel.css，无内联脚本', async () => {
+  for (const file of ['popup.html', 'sidepanel.html']) {
+    const html = await read(file)
+    assert.ok(/<script type="module" src="panel\.js"><\/script>/.test(html), `${file} 必须以模块方式加载 panel.js`)
+    assert.equal((html.match(/<script/g) ?? []).length, 1, `${file} 只允许一个 script 标签`)
+    assert.ok(!/<script(?![^>]*src=)/.test(html), `${file} 不得有内联脚本`)
+    assert.ok(/<link rel="stylesheet" href="panel\.css" \/>/.test(html))
+    assert.ok(!/<style/.test(html), `${file} 不得内联样式表`)
+  }
+  const popup = await read('popup.html')
+  const side = await read('sidepanel.html')
+  assert.ok(popup.includes('data-surface="popup"'))
+  assert.ok(side.includes('data-surface="side"'))
+})
+
+test('AC-126 面板文案齐备：状态、步骤、字段、按钮、脚注', async () => {
+  const surface = await panelSurface()
+  const required = [
+    '会议同传',
+    'Live Interpreter',
+    '未连接会议音频',
+    '无法连接会议音频',
+    '同传已关闭',
+    '原声直通中',
+    '同传进行中',
+    '无法开启同传',
+    '原声仍在直通',
+    '会议已静音',
+    '暂停翻译你的话',
+    '未感知到会议静音',
+    '正在恢复翻译…',
+    '正在连接会议音频…',
+    '正在启动本地翻译服务…',
+    '正在连接翻译服务…',
+    '你想听的语言',
+    '对方听的语言',
+    '开启同传',
+    '关闭同传',
+    '断开会议音频',
+    '正在开启…',
+    '正在关闭…',
+    '开启时会在本机启动翻译服务，对话会多一到两秒延迟。',
+  ]
+  for (const text of required) {
+    assert.ok(surface.includes(text), `面板缺少文案「${text}」`)
+  }
+})
+
+test('AC-126 面板不含被否决的入口：你说的语言 / 只连接原声 / 重试 / 静音 / 恢复翻译按钮', async () => {
+  const surface = await panelSurface()
+  for (const text of ['你说的语言', '只连接原声', '重试']) {
+    assert.ok(!surface.includes(text), `面板不得出现「${text}」`)
+  }
+  // 「静音」「恢复翻译」只能作为说明文字出现，不得成为按钮
+  const { PRIMARY_START, PRIMARY_STOP, PRIMARY_STARTING, PRIMARY_STOPPING, SECONDARY_DISCONNECT, HINTS } = await import(
+    '../../src/shared/runtime-state.mjs'
+  )
+  const buttonLabels = [PRIMARY_START, PRIMARY_STOP, PRIMARY_STARTING, PRIMARY_STOPPING, SECONDARY_DISCONNECT, ...Object.values(HINTS)]
+  for (const label of buttonLabels) {
+    for (const banned of ['静音', '恢复翻译', '重试']) {
+      assert.ok(!label.includes(banned), `按钮文案「${label}」不得含「${banned}」`)
+    }
+  }
+  // HTML 里的按钮文本一律由脚本填充，模板中没有写死的操作按钮
+  const popup = await read('popup.html')
+  const buttonTexts = [...popup.matchAll(/<button[^>]*>([^<]*)</g)].map((m) => m[1].trim()).filter(Boolean)
+  assert.deepEqual(buttonTexts, [], `按钮文案必须来自 statusCopy，模板里不得写死：${buttonTexts}`)
+})
+
+test('AC-126/AC-135 两个下拉各 14 项，且面板不含语言码或标签字面量', async () => {
+  const { TARGET_CHOICES } = await import('../../src/shared/languages.mjs')
+  assert.equal(TARGET_CHOICES.length, 14, '13 种输出语言 + 原声')
+  assert.equal(TARGET_CHOICES.filter((c) => c.separated).length, 1, '只有原声那一项前面有分隔线')
+  assert.equal(TARGET_CHOICES[13].id, ORIGINAL)
+
+  const src = await read('panel.js')
+  assert.ok(/for \(const choice of TARGET_CHOICES\)/.test(src), '下拉必须按 TARGET_CHOICES 渲染')
+  const codes = [...OUTPUT_LANGUAGES.map((l) => l.id), ORIGINAL]
+  for (const file of UI_FILES) {
+    const text = await read(file)
+    for (const code of codes) {
+      assert.ok(!new RegExp(`['"]${code}['"]`).test(text), `${file} 不得出现语言码字面量 '${code}'`)
+    }
+    for (const label of [...OUTPUT_LANGUAGES.map((l) => l.label), ORIGINAL_LABEL]) {
+      assert.ok(!text.includes(label), `${file} 不得出现语言标签字面量「${label}」`)
+    }
+  }
+})
+
+test('AC-128 弹窗 380×600、侧栏铺满，深色默认且跟随系统浅色', async () => {
+  const css = await read('panel.css')
+  assert.ok(/body\[data-surface='popup'\][\s\S]{0,120}width: 380px;[\s\S]{0,60}height: 600px;/.test(css))
+  assert.ok(/body\[data-surface='side'\][\s\S]{0,120}width: 100%;[\s\S]{0,60}min-height: 100vh;/.test(css))
+  assert.ok(/@media \(prefers-color-scheme: light\)/.test(css), '系统浅色时必须切浅色 token')
+  assert.ok(/--danger: #f07a68/.test(css) && /--warning: #e6b45a/.test(css), '错误与暂停用设计稿的色值')
+  assert.ok(/@keyframes li-pulse/.test(css), '进行中需要脉冲绿点')
+  assert.ok(/@keyframes li-spin/.test(css) && /\.power\[data-busy='true'\] \.spinner/.test(css), '开启中按钮内需要转圈')
+  assert.ok(/max-height: 280px/.test(css), '下拉需要在面板内滚动')
+  assert.ok(!/@import|https?:\/\//.test(css), '不得加载远程字体或样式')
+})
+
+test('AC-129 选项页：设备角色按 kind 过滤、衬底三选一、本地服务自检后立即断开', async () => {
+  const src = await read('options.js')
+  assert.ok(/enumerateAudioDevices\(\)/.test(src), '打开页面即枚举设备以触发授权提示')
+  assert.ok(/for \(const role of DEVICE_ROLES\)/.test(src), '四张设备卡必须按 DEVICE_ROLES 渲染')
+  assert.ok(/devices\.filter\(\(d\) => d\.kind === role\.kind\)/.test(src), '下拉必须按端点类型过滤')
+  assert.ok(/DEFAULT_ASSIGNMENT_LABEL/.test(src), '首项必须是「（默认分配）」')
+  assert.ok(/preflight\(devices, settings\.deviceOverrides\)/.test(src), '结论必须来自 preflight')
+  assert.ok(/deviceOverrides: overrides/.test(src), '改动即写 settings.deviceOverrides')
+  assert.ok(/for \(const entry of FLOOR_LEVEL_LABELS\)/.test(src), '衬底档位来自 floor.mjs')
+  assert.ok(/floorLevel: entry\.level/.test(src))
+
+  const probe = blockFrom(src, 'function probeHost(')
+  assert.ok(/connectNative\(HOST_NAME\)/.test(probe))
+  assert.ok(/frame\?\.type !== 'ready'/.test(probe) && /port\.disconnect\(\)/.test(probe), '拿到 ready 后必须立即断开端口')
+  assert.ok(/classifyNativeError\(/.test(probe), '失败原因必须经 classifyNativeError')
+
+  const html = await read('options.html')
+  assert.ok(html.includes('npm run install:host'), '失败时要给出安装命令')
+  assert.ok(html.includes('在 Google Meet 里静音时会自动暂停翻译你的话；其它会议平台暂不支持感知静音。'))
+  assert.ok(html.includes('建议戴耳机'), '需要「建议耳机」提示')
+  assert.ok(html.includes('模型可能不出声'), '需要同语言限制说明')
+  assert.ok(!/自动连接/.test(html) && !/自动连接/.test(src), '不得出现自动连接开关')
+})

@@ -1,0 +1,377 @@
+/* 弹窗与侧栏共用。深色默认，系统浅色时切浅色 token；系统字体栈，不加载远程字体。 */
+
+:root {
+  --bg: #17191d;
+  --field: #1f2228;
+  --menu: #22252b;
+  --border: #2e323a;
+  --text: #edeff3;
+  --muted: #9aa3b0;
+  --faint: #6b7380;
+  --accent: #4fd6b8;
+  --accent-tint: rgba(79, 214, 184, 0.14);
+  --on-accent: #0e0f12;
+  --danger: #f07a68;
+  --warning: #e6b45a;
+  --shadow: rgba(0, 0, 0, 0.5);
+  --opt-selected: rgba(79, 214, 184, 0.12);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #ffffff;
+    --field: #f3f4f6;
+    --menu: #ffffff;
+    --border: #d9dce2;
+    --text: #1b1d22;
+    --muted: #5d6572;
+    --faint: #8a919c;
+    --accent: #0f9b7f;
+    --accent-tint: rgba(15, 155, 127, 0.12);
+    --on-accent: #ffffff;
+    --danger: #c8422f;
+    --warning: #9a6a12;
+    --shadow: rgba(0, 0, 0, 0.15);
+    --opt-selected: rgba(15, 155, 127, 0.1);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  display: flex;
+  flex-direction: column;
+  padding: 20px 20px 16px;
+}
+
+body[data-surface='popup'] {
+  width: 380px;
+  height: 600px;
+}
+
+body[data-surface='side'] {
+  width: 100%;
+  min-height: 100vh;
+}
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 24px;
+  flex-grow: 1;
+  min-height: 0;
+}
+
+.top {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-height: 0;
+}
+
+/* ---------------------------------------------------------------- 头部 */
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mark {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--accent-tint);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex-grow: 1;
+}
+
+.brand {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.sub {
+  font-size: 12px;
+  color: var(--faint);
+}
+
+.tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.icon-button {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--faint);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  background: var(--field);
+  color: var(--text);
+}
+
+/* ---------------------------------------------------------------- 状态块 */
+
+.status {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.status-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.status[data-tone='danger'] .status-title {
+  color: var(--danger);
+}
+
+.status[data-tone='warning'] .status-body {
+  color: var(--warning);
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--accent);
+  display: none;
+  flex-shrink: 0;
+  animation: li-pulse 1.4s ease-in-out infinite;
+}
+
+.status[data-tone='live'] .dot,
+.status[data-tone='warning'] .dot {
+  display: block;
+}
+
+.status[data-tone='warning'] .dot {
+  background: var(--warning);
+}
+
+@keyframes li-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.status-body {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.status-note {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--faint);
+}
+
+.hint-link {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* ---------------------------------------------------------------- 语言选择 */
+
+.fields {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-label {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 0 2px;
+}
+
+.select-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.select-wrap svg.leading {
+  position: absolute;
+  left: 16px;
+  pointer-events: none;
+  color: var(--accent);
+}
+
+.select-wrap svg.chevron {
+  position: absolute;
+  right: 16px;
+  pointer-events: none;
+  color: var(--muted);
+}
+
+select {
+  appearance: none;
+  width: 100%;
+  height: 52px;
+  padding: 0 44px 0 48px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--field);
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+select:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* 14 项在面板内滚动而不是撑开弹窗 */
+select[size],
+select option {
+  max-height: 280px;
+}
+
+/* ---------------------------------------------------------------- 底部 */
+
+.bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.power {
+  height: 48px;
+  border-radius: 24px;
+  border: 0;
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.power[data-variant='outline'] {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-weight: 500;
+}
+
+.power:disabled {
+  cursor: default;
+  opacity: 0.75;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  display: none;
+  animation: li-spin 0.8s linear infinite;
+}
+
+.power[data-busy='true'] .spinner {
+  display: block;
+}
+
+@keyframes li-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.step {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  text-align: center;
+  min-height: 18px;
+}
+
+.footnote {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--faint);
+  text-align: center;
+}
+
+.disconnect {
+  align-self: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--faint);
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.disconnect:hover {
+  color: var(--text);
+}
+
+[hidden] {
+  display: none !important;
+}

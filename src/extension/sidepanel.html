@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>会议同传</title>
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+  <body data-surface="side">
+    <div class="shell">
+      <div class="top">
+        <div class="header">
+          <div class="mark">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="color: var(--accent)">
+              <path d="M3 12h2"></path><path d="M8 8v8"></path><path d="M12 4v16"></path><path d="M16 8v8"></path><path d="M19 12h2"></path>
+            </svg>
+          </div>
+          <div class="titles">
+            <div class="brand" id="brand"></div>
+            <div class="sub" id="brand-sub"></div>
+          </div>
+          <div class="tools">
+            <button class="icon-button" id="dock" type="button" title="停靠到侧栏" hidden>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M15 4v16"></path>
+              </svg>
+            </button>
+            <button class="icon-button" id="settings" type="button" title="设置">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="status" id="status" data-tone="idle">
+          <div class="status-title"><span class="dot"></span><span id="status-title"></span></div>
+          <div class="status-body" id="status-body"></div>
+          <div class="status-note" id="status-note" hidden></div>
+          <button class="hint-link" id="status-hint" type="button" hidden></button>
+        </div>
+
+        <div class="fields">
+          <div class="field">
+            <label class="field-label" id="hear-label" for="hear"></label>
+            <div class="select-wrap">
+              <svg class="leading" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M6.5 10a5.5 5.5 0 0 1 11 0c0 3-2.5 3.5-3.5 6s-1.5 4.5-4 4.5"></path><path d="M9.5 10a2.5 2.5 0 0 1 5 0c0 1.5-1.5 2-2 3.5"></path>
+              </svg>
+              <select id="hear"></select>
+              <svg class="chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M6 9l6 6 6-6"></path>
+              </svg>
+            </div>
+          </div>
+          <div class="field">
+            <label class="field-label" id="partner-label" for="partnerHears"></label>
+            <div class="select-wrap">
+              <svg class="leading" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="9" cy="8" r="3.5"></circle><path d="M3 20a6 6 0 0 1 12 0"></path><path d="M16.5 8.5a4 4 0 0 1 0 5"></path><path d="M19.5 5.5a8 8 0 0 1 0 11"></path>
+              </svg>
+              <select id="partnerHears"></select>
+              <svg class="chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M6 9l6 6 6-6"></path>
+              </svg>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="bottom">
+        <button class="power" id="power" type="button"><span class="spinner"></span><span id="power-label"></span></button>
+        <div class="step" id="step"></div>
+        <div class="footnote" id="footnote"></div>
+        <button class="disconnect" id="disconnect" type="button" hidden></button>
+      </div>
+    </div>
+    <script type="module" src="panel.js"></script>
+  </body>
+</html>
